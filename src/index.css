@@ -1,0 +1,29 @@
+:root {
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
+}
+
+body {
+  background: #1a1f18;
+}
+
+button,
+input {
+  font-family: "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+}

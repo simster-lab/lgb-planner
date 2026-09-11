@@ -1,0 +1,288 @@
+.app {
+  height: 100%;
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: #1a1f18;
+  color: #efe6d2;
+}
+
+.loading-layout {
+  place-items: center;
+  display: grid;
+  margin: 0;
+  color: #cfc3a4;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 14px;
+  background: #242b20;
+  border-bottom: 1px solid #3d4a32;
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.brand span {
+  color: #c4a35a;
+  font-size: 12px;
+}
+
+.brand .build {
+  color: #8f8670;
+  font-variant-numeric: tabular-nums;
+}
+
+.toolbar-actions,
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.toolbar-actions {
+  justify-content: flex-end;
+}
+
+.toolbar-actions button {
+  font-size: 13px;
+  padding: 7px 10px;
+  white-space: nowrap;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: 230px 1fr 300px;
+  height: 100%;
+  min-height: 0;
+}
+
+.panel {
+  background: #20261c;
+  border-right: 1px solid #3d4a32;
+  padding: 14px;
+  overflow: auto;
+}
+
+.inspector {
+  border-right: none;
+  border-left: 1px solid #3d4a32;
+}
+
+.panel h2,
+.panel h3,
+.modal h2 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  color: #d4b06a;
+}
+
+.panel h3 {
+  margin-top: 18px;
+}
+
+button {
+  background: #31392b;
+  color: #efe6d2;
+  border: 1px solid #4a5740;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font: inherit;
+}
+
+button:hover {
+  background: #3a4433;
+}
+
+button.active,
+button.primary {
+  background: #4a3a1c;
+  border-color: #c4a35a;
+  color: #f3e2b0;
+}
+
+button.danger {
+  border-color: #8b3a3a;
+  color: #f0c2c2;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.circuit-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(50vh, 360px);
+  overflow: auto;
+}
+
+.circuit-list li {
+  display: flex;
+  gap: 8px;
+}
+
+.circuit-list li .primary {
+  flex: 1;
+  text-align: left;
+}
+
+.palette button {
+  width: 100%;
+  text-align: left;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.palette button small {
+  color: #b5aa8e;
+  font-size: 11px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  flex: 1;
+}
+
+.field span,
+.check {
+  font-size: 12px;
+  color: #cfc3a4;
+}
+
+input[type="text"],
+input[type="number"],
+input[type="password"] {
+  background: #151910;
+  color: #efe6d2;
+  border: 1px solid #4a5740;
+  border-radius: 6px;
+  padding: 7px 8px;
+  font: inherit;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.hint,
+.meta {
+  color: #b5aa8e;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.canvas-wrap {
+  position: relative;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+  touch-action: none;
+}
+
+canvas.placing {
+  cursor: crosshair;
+}
+
+canvas.lever {
+  cursor: pointer;
+}
+
+.canvas-hint {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid #c4a35a;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.place-debug {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  margin: 0;
+  max-width: min(420px, calc(100% - 24px));
+  max-height: 40%;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.72);
+  border: 1px solid #c4a35a;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #e7d7a7;
+  pointer-events: none;
+  white-space: pre-wrap;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: grid;
+  place-items: center;
+  z-index: 10;
+}
+
+.modal {
+  width: min(480px, calc(100vw - 24px));
+  background: #242b20;
+  border: 1px solid #c4a35a;
+  border-radius: 12px;
+  padding: 18px;
+}
+
+.status {
+  font-size: 12px;
+}
+
+.status.connected {
+  color: #8fd4a8;
+}
+
+.status.error,
+.status.disconnected {
+  color: #e0b07a;
+}
+
+.status.connecting {
+  color: #d4b06a;
+}
+
+code {
+  color: #f3e2b0;
+}

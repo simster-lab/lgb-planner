@@ -1,0 +1,17 @@
+services:
+  lgb-planner:
+    build: .
+    image: lgb-planner
+    ports:
+      - "8080:8080"
+    volumes:
+      - ${LGB_DATA:-./data}:/data
+    environment:
+      DATA_DIR: /data
+      MQTT_HOST: ${MQTT_HOST:-localhost}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_PATH: ${MQTT_PATH:-/mqtt}
+      MQTT_TLS: ${MQTT_TLS:-false}
+      MQTT_USER: ${MQTT_USER:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+    restart: unless-stopped

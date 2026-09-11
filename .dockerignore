@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-ssr
+.git
+.cursor
+*.md
+docs
+scripts
+terminals
+.oxlintrc.json
+*.local
+.DS_Store
