@@ -73,6 +73,7 @@ These are different fields.
 | **Name** | `LGB-Planner` (or anything you like) | Container name in the Unraid list. Unraid often capitalises this. It does **not** have to match the image. |
 | **Repository** | `lgb-planner:latest` | The image you built in step 3. Must match `docker images` exactly. |
 | **Registry URL** | *leave empty* | If this is `https://hub.docker.com/` or similar, Unraid will try to pull from the internet and fail. |
+| **Icon URL** | `https://raw.githubusercontent.com/simster-lab/lgb-planner/main/docs/unraid-icon.png` | Docker tab icon. If this is empty, Unraid looks up `lgb-planner` on Docker Hub, fails, and **spams the syslog**. |
 
 Do **not** type `lbg-planner`. Do not type `docker.io/lgb-planner` unless you have actually published the image.
 
@@ -257,5 +258,6 @@ Follow [section 7](#7-updates-browser-refresh-does-nothing). Then open `http://T
 | Works in Node-RED, not here | Saved Settings still have port `9001` — set **1883**, Save & connect |
 | Status cycles connected / disconnected | Old image (browser WS to 1883). Rebuild and **recreate** the container |
 | HTTPS reverse proxy, MQTT fails | Page is HTTPS so the planner WS is `wss` to the **same** proxy host, not to Mosquitto |
+| Docker tab missing icon / syslog spam about a missing image | Empty **Icon URL**. Unraid then tries Docker Hub for `lgb-planner`. Edit the container (Advanced View), set Icon URL to `https://raw.githubusercontent.com/simster-lab/lgb-planner/main/docs/unraid-icon.png`, Apply. No rebuild. Repo must be **public** for that URL to work. |
 
 The planner container talks to Mosquitto over TCP (like Node-RED). If MQTT Explorer or Node-RED can use `192.168.0.2:1883`, this app can too after Settings use that host and port **and** this image includes the TCP bridge.

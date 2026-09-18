@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <rect width="256" height="256" rx="48" fill="#242b20"/>
+  <g fill="none" stroke="#d4b06a" stroke-linecap="round">
+    <path stroke-width="10" d="M40 168h176"/>
+    <path stroke-width="10" d="M40 188h176"/>
+    <path stroke-width="6" d="M64 158v40M96 158v40M128 158v40M160 158v40M192 158v40"/>
+  </g>
+  <path fill="#c43c2c" d="M78 70h18v70H78z"/>
+  <g transform="translate(87 78) rotate(-8)">
+    <rect x="0" y="-8" width="86" height="16" rx="3" fill="#c43c2c"/>
+    <rect x="62" y="-8" width="24" height="16" fill="#efe6d2"/>
+  </g>
+  <circle cx="87" cy="78" r="8" fill="#d94a3a"/>
+  <text x="128" y="148" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="36" font-weight="700" fill="#f3e2b0">LGB</text>
+</svg>
