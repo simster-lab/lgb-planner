@@ -1,5 +1,7 @@
-import { createPlacedPiece } from "../src/editor/pieceFactory.ts";
-import { ghostAt, freePorts, poseBesideTrack, recomputeConnections } from "../src/editor/snap.ts";
+import { liveSections } from "../src/editor/liveRoutes.ts";
+import { createPlacedPiece, flipPiece, flipPlacing } from "../src/editor/pieceFactory.ts";
+import { attachPortFor, cyclePlacingSnap, ghostAt, freePorts, placingAttachPorts, poseBesideTrack, recomputeConnections } from "../src/editor/snap.ts";
+import { clonePieces, piecesAt, piecesRelativeToCenter, rotatePieces, selectionCenter } from "../src/editor/selection.ts";
 import { worldPorts } from "../src/model/geometry.ts";
 import { parseLayout, serializeLayout, circuitNameFromFilename, sanitizeCircuitName } from "../src/persist/io.ts";
 import type { LayoutPiece, Placing } from "../src/model/types.ts";
@@ -100,6 +102,99 @@ const northSouth = [createPlacedPiece({ type: "straight", lengthMm: 300 }, 0, 0,
 const right = poseBesideTrack(0, 150, northSouth);
 if (!right || right.rotationDeg !== 0 || right.x <= 0) {
   throw new Error("signal on north-south track should stand upright to the right");
+}
+
+const turnout = createPlacedPiece({ type: "point", sku: "12100", hand: "left" }, 800, 0, 0);
+const straightPlacing: Placing = { type: "straight", lengthMm: 300 };
+function placeOnPort(pieces: LayoutPiece[], pieceId: string, portId: "a" | "through" | "diverge"): LayoutPiece {
+  const target = worldPorts(pieces.find((item) => item.id === pieceId)!).find((port) => port.portId === portId);
+  if (!target) throw new Error(`missing port ${portId}`);
+  const ghost = ghostAt(straightPlacing, pieces, target.x, target.y);
+  return createPlacedPiece(straightPlacing, ghost.x, ghost.y, ghost.rotationDeg);
+}
+const stock = placeOnPort([turnout], turnout.id, "a");
+const thruRoad = placeOnPort([turnout, stock], turnout.id, "through");
+const divRoad = placeOnPort([turnout, stock, thruRoad], turnout.id, "diverge");
+const yard = [
+  { ...turnout, pointState: "through" as const },
+  stock,
+  thruRoad,
+  divRoad,
+];
+const throughLive = liveSections(yard);
+const divergeLive = liveSections(
+  yard.map((piece) => (piece.id === turnout.id ? { ...piece, pointState: "diverge" as const } : piece)),
+);
+if (throughLive.length !== 2 || divergeLive.length !== 2) {
+  throw new Error(`expected 2 live sections per throw, got ${throughLive.length}/${divergeLive.length}`);
+}
+const throughHasPoint = throughLive.some((section) =>
+  section.paths.some((path) => path.some((p) => Math.hypot(p.x - turnout.x, p.y - turnout.y) < 5)),
+);
+if (!throughHasPoint) throw new Error("through live section should include the point centre-line");
+
+const flippedCurve = flipPlacing({ type: "curve", sku: "15000", hand: "left" });
+if (flippedCurve.hand !== "right") throw new Error("F should flip a curve before it is placed");
+if (flipPlacing(flippedCurve).hand !== "left") throw new Error("F should toggle curve hand back");
+
+const rotatedPlace = flipPlacing({ type: "straight", lengthMm: 300, rotationDeg: 0 });
+if (rotatedPlace.rotationDeg !== 90) throw new Error("F should rotate a straight 90° before it is placed");
+
+const east = createPlacedPiece({ type: "straight", lengthMm: 300 }, 0, 0, 0);
+const north = flipPiece(east);
+if (Math.abs(north.rotationDeg - 90) > 0.01) throw new Error("placed straight should rotate 90°");
+const eastMid = { x: 150, y: 0 };
+const northMid = { x: north.x + 150 * Math.cos((north.rotationDeg * Math.PI) / 180), y: north.y + 150 * Math.sin((north.rotationDeg * Math.PI) / 180) };
+if (Math.hypot(northMid.x - eastMid.x, northMid.y - eastMid.y) > 0.5) {
+  throw new Error("straight 90° rotate should keep the midpoint");
+}
+
+const pointPlace: Placing = { type: "point", sku: "12100", hand: "left" };
+const pointJoins = placingAttachPorts(pointPlace).map((port) => port.portId);
+if (pointJoins.join(",") !== "a,through,diverge") {
+  throw new Error(`point should have 3 snap ends, got ${pointJoins.join(",")}`);
+}
+const throughPlace = cyclePlacingSnap(pointPlace, 1);
+const divergePlace = cyclePlacingSnap(throughPlace, 1);
+const backToStock = cyclePlacingSnap(divergePlace, 1);
+if (attachPortFor(throughPlace)?.portId !== "through") throw new Error("D should select the through joiner");
+if (attachPortFor(divergePlace)?.portId !== "diverge") throw new Error("D again should select the diverge joiner");
+if (attachPortFor(backToStock)?.portId !== "a") throw new Error("D should wrap back to stock");
+const run = createPlacedPiece({ type: "straight", lengthMm: 300 }, 0, 0, 0);
+const stockGhost = ghostAt(pointPlace, [run], 300, 0);
+const divergeGhost = ghostAt(divergePlace, [run], 300, 0);
+if (
+  Math.hypot(stockGhost.x - divergeGhost.x, stockGhost.y - divergeGhost.y) < 1 &&
+  Math.abs(stockGhost.rotationDeg - divergeGhost.rotationDeg) < 1
+) {
+  throw new Error("snapping a point through diverge should pose it differently than stock");
+}
+
+const groupA = createPlacedPiece({ type: "straight", lengthMm: 300 }, 0, 0, 0);
+const groupB = createPlacedPiece({ type: "straight", lengthMm: 300 }, 300, 0, 0);
+const turned = rotatePieces([groupA, groupB], 90);
+const turnedLeft = turned.find((piece) => piece.id === groupA.id);
+const turnedRight = turned.find((piece) => piece.id === groupB.id);
+if (!turnedLeft || !turnedRight) throw new Error("rotate should keep piece ids");
+if (Math.abs(turnedLeft.rotationDeg - 90) > 0.01 || Math.abs(turnedRight.rotationDeg - 90) > 0.01) {
+  throw new Error("group rotate should add 90° to each piece");
+}
+if (Math.hypot(turnedLeft.x - turnedRight.x, turnedLeft.y - turnedRight.y) < 200) {
+  throw new Error("group rotate should keep pieces apart");
+}
+const copies = clonePieces([groupA, groupB]);
+if (copies.length !== 2) throw new Error("paste should clone the selection");
+if (copies.some((piece) => piece.id === groupA.id || piece.id === groupB.id)) {
+  throw new Error("pasted pieces need new ids");
+}
+const relative = piecesRelativeToCenter([groupA, groupB]);
+const dropped = piecesAt(relative, { x: 1000, y: 500 });
+if (Math.abs(dropped[0].x - dropped[1].x) < 200) {
+  throw new Error("paste ghost should keep group spacing");
+}
+const dropCenter = selectionCenter(dropped);
+if (Math.hypot(dropCenter.x - 1000, dropCenter.y - 500) > 1) {
+  throw new Error("paste group should sit on the cursor");
 }
 
 console.log("geometry and persist checks passed");

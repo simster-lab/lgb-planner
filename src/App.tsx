@@ -10,7 +10,8 @@ import { Toolbar } from "./ui/Toolbar";
 import "./App.css";
 
 function EditorApp() {
-  const { layout, selected, placing, dispatch, replacePiece, settingsOpen } = useEditor();
+  const { layout, selectedIds, placing, pasting, editorMode, dispatch, replacePiece, replacePieces, settingsOpen } =
+    useEditor();
 
   useEffect(() => {
     mqttService.onStatus((status, message) => {
@@ -57,27 +58,55 @@ function EditorApp() {
         dispatch({ type: "redo" });
         return;
       }
+      if ((event.ctrlKey || event.metaKey) && !typing) {
+        const key = event.key.toLowerCase();
+        if (key === "a") {
+          event.preventDefault();
+          if (editorMode === "plan") dispatch({ type: "selectAll" });
+          return;
+        }
+        if (key === "c" && selectedIds.length) {
+          event.preventDefault();
+          dispatch({ type: "copySelected" });
+          return;
+        }
+        if (key === "v") {
+          event.preventDefault();
+          if (editorMode === "plan") dispatch({ type: "pasteClipboard" });
+          return;
+        }
+      }
       if (typing) return;
       if (event.key === "Escape") {
         dispatch({ type: "setPlacing", placing: null });
+        dispatch({ type: "setPasting", pieces: null });
+        dispatch({ type: "select", id: null });
+        return;
       }
-      if ((event.key === "Delete" || event.key === "Backspace") && selected) {
+      if (editorMode !== "plan") return;
+      if (pasting) {
+        if (event.key.toLowerCase() === "r") {
+          event.preventDefault();
+          dispatch({ type: "rotatePasting", degrees: event.shiftKey ? -90 : 90 });
+        }
+        return;
+      }
+      if ((event.key === "Delete" || event.key === "Backspace") && selectedIds.length) {
         dispatch({ type: "deleteSelected" });
       }
-      if (event.key.toLowerCase() === "f") {
-        if (placing) {
-          dispatch({
-            type: "setPlacing",
-            placing: { ...placing, hand: placing.hand === "right" ? "left" : "right" },
-          });
-        } else if (selected) {
-          replacePiece(flipPiece(selected));
-        }
+      if (event.key.toLowerCase() === "f" && !placing && selectedIds.length) {
+        const flipped = layout.pieces.filter((piece) => selectedIds.includes(piece.id)).map(flipPiece);
+        if (flipped.length === 1) replacePiece(flipped[0]);
+        else if (flipped.length) replacePieces(flipped);
+      }
+      if (event.key.toLowerCase() === "r" && !placing && selectedIds.length) {
+        event.preventDefault();
+        dispatch({ type: "rotateSelected", degrees: event.shiftKey ? -90 : 90 });
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [dispatch, placing, replacePiece, selected]);
+  }, [dispatch, editorMode, layout.pieces, pasting, placing, replacePiece, replacePieces, selectedIds]);
 
   useEffect(() => {
     return () => mqttService.disconnect();
@@ -86,8 +115,8 @@ function EditorApp() {
   return (
     <div className="app">
       <Toolbar />
-      <div className="workspace">
-        <Palette />
+      <div className={`workspace ${editorMode}`}>
+        {editorMode === "plan" ? <Palette /> : null}
         <EditorCanvas />
         <Inspector />
       </div>

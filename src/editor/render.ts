@@ -8,15 +8,27 @@ import {
   pointSpec,
   signalSpec,
 } from "../catalog/lgb";
-import { degToRad, localToWorld } from "../model/geometry";
-import type { Hand, LayoutPiece, Vec2, ViewState, WorldPort } from "../model/types";
+import { degToRad, localToWorld, worldPorts } from "../model/geometry";
+import type { EditorMode, Hand, LayoutPiece, PortId, Vec2, ViewState, WorldPort } from "../model/types";
+
+export interface Bounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
 
 export interface DrawExtras {
-  selectedId: string | null;
+  selectedIds: string[];
   ghost?: LayoutPiece;
+  ghosts?: LayoutPiece[];
   freePorts: WorldPort[];
   anim: Map<string, number>;
   hoverLeverId?: string | null;
+  editorMode: EditorMode;
+  liveSections?: { colour: string; paths: Vec2[][] }[];
+  attachPortId?: PortId;
+  marquee?: { x0: number; y0: number; x1: number; y1: number; crossing: boolean };
 }
 
 function sampleArc(radiusMm: number, angleDeg: number, hand: Hand, stepMm = 14): Vec2[] {
@@ -83,6 +95,38 @@ function mixPaths(a: Vec2[], b: Vec2[], t: number): Vec2[] {
 
 export function worldPath(piece: LayoutPiece, local: Vec2[]): Vec2[] {
   return local.map((p) => localToWorld(piece, p));
+}
+
+export function pieceBounds(piece: LayoutPiece): Bounds {
+  const pts: Vec2[] = [];
+  if (piece.type === "signal") {
+    pts.push(localToWorld(piece, { x: 0, y: 0 }));
+    pts.push(localToWorld(piece, { x: 0, y: -58 }));
+  } else {
+    for (const path of piecePaths(piece)) pts.push(...worldPath(piece, path));
+  }
+  if (pts.length === 0) {
+    return { minX: piece.x, minY: piece.y, maxX: piece.x, maxY: piece.y };
+  }
+  let minX = pts[0].x;
+  let minY = pts[0].y;
+  let maxX = pts[0].x;
+  let maxY = pts[0].y;
+  for (const p of pts) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+export function boundsContain(outer: Bounds, inner: Bounds): boolean {
+  return inner.minX >= outer.minX && inner.maxX <= outer.maxX && inner.minY >= outer.minY && inner.maxY <= outer.maxY;
+}
+
+export function boundsIntersect(a: Bounds, b: Bounds): boolean {
+  return a.minX <= b.maxX && a.maxX >= b.minX && a.minY <= b.maxY && a.maxY >= b.minY;
 }
 
 function offsetLine(pts: Vec2[], dist: number): Vec2[] {
@@ -271,6 +315,7 @@ function drawPointExtras(
   diverge: Vec2[],
   anim: number,
   alpha: number,
+  showRoute: boolean,
 ): void {
   const spec = pointSpec(piece.sku);
   if (!spec) return;
@@ -309,7 +354,7 @@ function drawPointExtras(
   strokePolyline(ctx, offsetLine(open, -RAIL_OFFSET), 2.4, "#b08a40", alpha * 0.7);
 
   const route = mixPaths(through, diverge, anim);
-  strokePolyline(ctx, route, 4.2, "#7dffb0", alpha);
+  if (showRoute) strokePolyline(ctx, route, 4.2, "#7dffb0", alpha);
 
   const frogIndex = Math.min(through.length - 1, Math.round(through.length * 0.42));
   const frog = through[frogIndex];
@@ -331,7 +376,7 @@ function drawPiece(
   ghost = false,
 ): void {
   const alpha = ghost ? 0.45 : 1;
-  const selected = extras.selectedId === piece.id;
+  const selected = extras.selectedIds.includes(piece.id);
   const paths = piecePaths(piece).map((path) => worldPath(piece, path));
   const seen = new Set<string>();
 
@@ -360,7 +405,7 @@ function drawPiece(
   });
 
   if (piece.type === "point" && paths[0] && paths[1]) {
-    drawPointExtras(ctx, piece, paths[0], paths[1], pointAnim, alpha);
+    drawPointExtras(ctx, piece, paths[0], paths[1], pointAnim, alpha, extras.editorMode !== "run");
     if (!ghost) drawLever(ctx, piece, pointAnim, extras.hoverLeverId === piece.id);
   }
 
@@ -431,18 +476,57 @@ export function drawScene(
   for (const piece of track) drawPiece(ctx, piece, extras);
   for (const piece of signals) drawPiece(ctx, piece, extras);
   if (extras.ghost) drawPiece(ctx, extras.ghost, extras, true);
+  for (const piece of extras.ghosts ?? []) drawPiece(ctx, piece, extras, true);
 
-  ctx.save();
-  for (const port of extras.freePorts) {
-    ctx.fillStyle = "#8fd4a8";
-    ctx.beginPath();
-    ctx.arc(port.x, port.y, 7, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = "#17351f";
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
+  if (extras.editorMode === "run" && extras.liveSections) {
+    for (const section of extras.liveSections) {
+      for (const path of section.paths) {
+        strokePolyline(ctx, path, 10, section.colour, 0.95);
+      }
+    }
   }
-  ctx.restore();
+
+  if (extras.editorMode === "plan") {
+    ctx.save();
+    for (const port of extras.freePorts) {
+      ctx.fillStyle = "#8fd4a8";
+      ctx.beginPath();
+      ctx.arc(port.x, port.y, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#17351f";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    if (extras.ghost && extras.attachPortId) {
+      for (const port of worldPorts(extras.ghost)) {
+        const active = port.portId === extras.attachPortId;
+        ctx.fillStyle = active ? "#f0d48a" : "rgba(240, 212, 138, 0.35)";
+        ctx.beginPath();
+        ctx.arc(port.x, port.y, active ? 10 : 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = active ? "#7a5a12" : "#5a4a20";
+        ctx.lineWidth = active ? 2.4 : 1.2;
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  if (extras.marquee) {
+    const { x0, y0, x1, y1, crossing } = extras.marquee;
+    const left = Math.min(x0, x1);
+    const top = Math.min(y0, y1);
+    const w = Math.abs(x1 - x0);
+    const h = Math.abs(y1 - y0);
+    ctx.save();
+    ctx.fillStyle = crossing ? "rgba(126, 200, 255, 0.12)" : "rgba(125, 255, 176, 0.12)";
+    ctx.strokeStyle = crossing ? "#7ec8ff" : "#7dffb0";
+    ctx.lineWidth = 2 / view.zoom;
+    ctx.setLineDash(crossing ? [8 / view.zoom, 6 / view.zoom] : []);
+    ctx.fillRect(left, top, w, h);
+    ctx.strokeRect(left, top, w, h);
+    ctx.restore();
+  }
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = "rgba(0,0,0,0.45)";

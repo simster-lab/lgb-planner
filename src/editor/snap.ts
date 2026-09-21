@@ -13,8 +13,9 @@ import {
   headingsOpposite,
   poseFromPort,
   radToDeg,
+  rotateLocal,
 } from "../model/geometry";
-import type { LayoutPiece, LocalPort, Placing, WorldPort } from "../model/types";
+import type { LayoutPiece, LocalPort, Placing, PortId, WorldPort } from "../model/types";
 import { createPlacedPiece } from "./pieceFactory";
 import { piecePaths, worldPath } from "./render";
 
@@ -87,6 +88,31 @@ export function nearestFreePort(
   return best;
 }
 
+export function placingAttachPorts(placing: Placing): LocalPort[] {
+  if (placing.type === "signal") return [];
+  const draft = createPlacedPiece(placing, 0, 0, 0, { preview: true });
+  return localPorts(draft);
+}
+
+export function attachPortFor(placing: Placing): LocalPort | undefined {
+  const ports = placingAttachPorts(placing);
+  if (ports.length === 0) return undefined;
+  const cycle = placing.snapCycle ?? 0;
+  return ports[(((cycle % ports.length) + ports.length) % ports.length)];
+}
+
+export function cyclePlacingSnap(placing: Placing, delta: number): Placing {
+  const ports = placingAttachPorts(placing);
+  if (ports.length <= 1) return placing;
+  const cycle = placing.snapCycle ?? 0;
+  const next = (((cycle + delta) % ports.length) + ports.length) % ports.length;
+  return { ...placing, snapCycle: next };
+}
+
+export function attachPortId(placing: Placing): PortId | undefined {
+  return attachPortFor(placing)?.portId;
+}
+
 export function attachPose(
   attachPort: LocalPort,
   target: WorldPort,
@@ -155,6 +181,16 @@ export function poseBesideTrack(
   };
 }
 
+function poseWithPortAt(
+  attach: LocalPort,
+  worldX: number,
+  worldY: number,
+  rotationDeg: number,
+): { x: number; y: number; rotationDeg: number } {
+  const rotated = rotateLocal(attach.x, attach.y, rotationDeg);
+  return { x: worldX - rotated.x, y: worldY - rotated.y, rotationDeg };
+}
+
 export function ghostAt(
   placing: Placing,
   pieces: LayoutPiece[],
@@ -169,17 +205,20 @@ export function ghostAt(
     return createPlacedPiece(placing, worldX, worldY, 0, { preview: true });
   }
 
-  const start = startPortFor(placing);
+  const attach = attachPortFor(placing) ?? startPortFor(placing);
   const target = nearestFreePort(pieces, worldX, worldY);
   if (target) {
-    const fitted = tryFitStraight(placing, pieces, target);
-    if (fitted) return fitted;
-    const pose = attachPose(start, target);
+    if (attach.portId === "a") {
+      const fitted = tryFitStraight(placing, pieces, target);
+      if (fitted) return fitted;
+    }
+    const pose = attachPose(attach, target);
     return createPlacedPiece(placing, pose.x, pose.y, pose.rotationDeg, {
       preview: true,
     });
   }
-  return createPlacedPiece(placing, worldX, worldY, 0, { preview: true });
+  const pose = poseWithPortAt(attach, worldX, worldY, placing.rotationDeg ?? 0);
+  return createPlacedPiece(placing, pose.x, pose.y, pose.rotationDeg, { preview: true });
 }
 
 export function tryFitStraight(

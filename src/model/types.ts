@@ -1,5 +1,7 @@
 import { runtimeBrokerDefaults } from "../config";
 
+export type EditorMode = "plan" | "run";
+
 export type PieceType = "straight" | "curve" | "point" | "signal";
 
 export type CurveSku = "11000" | "15000" | "16000";
@@ -85,6 +87,8 @@ export interface Placing {
   sku?: CatalogSku;
   lengthMm?: number;
   hand?: Hand;
+  rotationDeg?: number;
+  snapCycle?: number;
 }
 
 export interface ViewState {

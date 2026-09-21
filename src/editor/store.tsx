@@ -10,6 +10,7 @@ import {
 } from "react";
 import type {
   BrokerConfig,
+  EditorMode,
   LayoutDocument,
   LayoutPiece,
   MqttConnectionStatus,
@@ -22,19 +23,23 @@ import { defaultBrokerConfig, emptyLayout } from "../model/types";
 import { loadAutosave, writeAutosave } from "../persist/io";
 import { fetchCurrentCircuit, saveCurrentCircuit } from "../persist/remote";
 import { loadRuntimeConfig } from "../config";
+import { piecesRelativeToCenter, rotatePieces, snapshotPieces } from "./selection";
 import { resetPointSerial } from "./pieceFactory";
 
 const MAX_HISTORY = 80;
 
 export interface EditorState {
   layout: LayoutDocument;
-  selectedId: string | null;
+  selectedIds: string[];
   placing: Placing | null;
   view: ViewState;
   mqttStatus: MqttConnectionStatus;
   mqttError?: string;
   settingsOpen: boolean;
   circuitName: string | null;
+  editorMode: EditorMode;
+  clipboard: LayoutPiece[];
+  pasting: LayoutPiece[] | null;
   past: LayoutDocument[];
   future: LayoutDocument[];
 }
@@ -46,15 +51,26 @@ type EditorAction =
   | { type: "addPiece"; piece: LayoutPiece }
   | { type: "updatePiece"; id: string; patch: Partial<LayoutPiece> }
   | { type: "replacePiece"; piece: LayoutPiece }
+  | { type: "replacePieces"; pieces: LayoutPiece[] }
   | { type: "previewPiece"; piece: LayoutPiece }
+  | { type: "previewPieces"; pieces: LayoutPiece[] }
   | { type: "deleteSelected" }
-  | { type: "select"; id: string | null }
+  | { type: "select"; id: string | null; additive?: boolean }
+  | { type: "setSelection"; ids: string[] }
   | { type: "setPlacing"; placing: Placing | null }
   | { type: "setView"; view: Partial<ViewState> }
   | { type: "setMqttSettings"; mqtt: BrokerConfig }
   | { type: "setMqttStatus"; status: MqttConnectionStatus; message?: string }
   | { type: "setSettingsOpen"; open: boolean }
   | { type: "setCircuitName"; name: string | null }
+  | { type: "setEditorMode"; mode: EditorMode }
+  | { type: "copySelected" }
+  | { type: "pasteClipboard" }
+  | { type: "setPasting"; pieces: LayoutPiece[] | null }
+  | { type: "rotatePasting"; degrees: number }
+  | { type: "addPieces"; pieces: LayoutPiece[] }
+  | { type: "rotateSelected"; degrees: number }
+  | { type: "selectAll" }
   | { type: "undo" }
   | { type: "redo" };
 
@@ -67,6 +83,11 @@ function withHistory(state: EditorState, layout: LayoutDocument): EditorState {
     past: [...state.past, state.layout].slice(-MAX_HISTORY),
     future: [],
   };
+}
+
+function applyPieceMap(pieces: LayoutPiece[], next: LayoutPiece[]): LayoutPiece[] {
+  const map = new Map(next.map((piece) => [piece.id, piece]));
+  return pieces.map((piece) => map.get(piece.id) ?? piece);
 }
 
 function reducer(state: EditorState, action: EditorAction): EditorState {
@@ -86,8 +107,9 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
       resetPointSerial([]);
       return {
         ...withHistory(state, layout),
-        selectedId: null,
+        selectedIds: [],
         placing: null,
+        pasting: null,
         circuitName: null,
       };
     }
@@ -95,8 +117,9 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
       resetPointSerial(action.layout.pieces);
       return {
         ...withHistory(state, action.layout),
-        selectedId: null,
+        selectedIds: [],
         placing: null,
+        pasting: null,
         circuitName: action.name === undefined ? state.circuitName : action.name,
       };
     case "addPiece":
@@ -105,7 +128,8 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
           ...state.layout,
           pieces: [...state.layout.pieces, action.piece],
         }),
-        selectedId: action.piece.id,
+        selectedIds: [action.piece.id],
+        placing: state.placing ? { ...state.placing, snapCycle: 0 } : state.placing,
       };
     case "updatePiece":
       return withHistory(state, {
@@ -121,6 +145,11 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
           piece.id === action.piece.id ? action.piece : piece,
         ),
       });
+    case "replacePieces":
+      return withHistory(state, {
+        ...state.layout,
+        pieces: applyPieceMap(state.layout.pieces, action.pieces),
+      });
     case "previewPiece":
       return {
         ...state,
@@ -131,22 +160,43 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
           ),
         },
       };
+    case "previewPieces":
+      return {
+        ...state,
+        layout: {
+          ...state.layout,
+          pieces: applyPieceMap(state.layout.pieces, action.pieces),
+        },
+      };
     case "deleteSelected":
-      if (!state.selectedId) return state;
+      if (state.selectedIds.length === 0) return state;
       return {
         ...withHistory(state, {
           ...state.layout,
-          pieces: state.layout.pieces.filter((piece) => piece.id !== state.selectedId),
+          pieces: state.layout.pieces.filter((piece) => !state.selectedIds.includes(piece.id)),
         }),
-        selectedId: null,
+        selectedIds: [],
       };
     case "select":
-      return { ...state, selectedId: action.id };
+      if (action.id == null) return { ...state, selectedIds: [] };
+      if (action.additive) {
+        const has = state.selectedIds.includes(action.id);
+        return {
+          ...state,
+          selectedIds: has
+            ? state.selectedIds.filter((id) => id !== action.id)
+            : [...state.selectedIds, action.id],
+        };
+      }
+      return { ...state, selectedIds: [action.id] };
+    case "setSelection":
+      return { ...state, selectedIds: action.ids };
     case "setPlacing":
       return {
         ...state,
         placing: action.placing,
-        selectedId: action.placing ? null : state.selectedId,
+        pasting: null,
+        selectedIds: action.placing ? [] : state.selectedIds,
       };
     case "setView":
       return { ...state, view: { ...state.view, ...action.view } };
@@ -164,6 +214,65 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
       return { ...state, settingsOpen: action.open };
     case "setCircuitName":
       return { ...state, circuitName: action.name };
+    case "setEditorMode":
+      return {
+        ...state,
+        editorMode: action.mode,
+        placing: action.mode === "run" ? null : state.placing,
+        pasting: action.mode === "run" ? null : state.pasting,
+      };
+    case "copySelected": {
+      const pieces = state.layout.pieces.filter((piece) => state.selectedIds.includes(piece.id));
+      if (pieces.length === 0) return state;
+      return { ...state, clipboard: snapshotPieces(pieces) };
+    }
+    case "pasteClipboard": {
+      if (state.clipboard.length === 0) return state;
+      return {
+        ...state,
+        placing: null,
+        selectedIds: [],
+        pasting: piecesRelativeToCenter(state.clipboard),
+      };
+    }
+    case "setPasting":
+      return {
+        ...state,
+        pasting: action.pieces,
+        placing: action.pieces ? null : state.placing,
+      };
+    case "rotatePasting":
+      if (!state.pasting?.length) return state;
+      return {
+        ...state,
+        pasting: rotatePieces(state.pasting, action.degrees, { x: 0, y: 0 }),
+      };
+    case "addPieces":
+      if (action.pieces.length === 0) return state;
+      return {
+        ...withHistory(state, {
+          ...state.layout,
+          pieces: [...state.layout.pieces, ...action.pieces],
+        }),
+        selectedIds: action.pieces.map((piece) => piece.id),
+        pasting: null,
+        placing: null,
+      };
+    case "rotateSelected": {
+      const selected = state.layout.pieces.filter((piece) => state.selectedIds.includes(piece.id));
+      if (selected.length === 0) return state;
+      return withHistory(state, {
+        ...state.layout,
+        pieces: applyPieceMap(state.layout.pieces, rotatePieces(selected, action.degrees)),
+      });
+    }
+    case "selectAll":
+      return {
+        ...state,
+        placing: null,
+        pasting: null,
+        selectedIds: state.layout.pieces.map((piece) => piece.id),
+      };
     case "undo": {
       const previous = state.past.at(-1);
       if (!previous) return state;
@@ -172,7 +281,7 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
         layout: previous,
         past: state.past.slice(0, -1),
         future: [state.layout, ...state.future],
-        selectedId: null,
+        selectedIds: [],
       };
     }
     case "redo": {
@@ -183,7 +292,7 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
         layout: next,
         past: [...state.past, state.layout],
         future: state.future.slice(1),
-        selectedId: null,
+        selectedIds: [],
       };
     }
     default:
@@ -193,12 +302,15 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
 
 const initialState: EditorState = {
   layout: emptyLayout(),
-  selectedId: null,
+  selectedIds: [],
   placing: null,
   view: defaultView,
   mqttStatus: "disconnected",
   settingsOpen: false,
   circuitName: null,
+  editorMode: "plan",
+  clipboard: [],
+  pasting: null,
   past: [],
   future: [],
 };
@@ -209,7 +321,9 @@ interface EditorContextValue extends EditorState {
   addPiece: (piece: LayoutPiece) => void;
   updatePiece: (id: string, patch: Partial<LayoutPiece>) => void;
   replacePiece: (piece: LayoutPiece) => void;
+  replacePieces: (pieces: LayoutPiece[]) => void;
   previewPiece: (piece: LayoutPiece) => void;
+  previewPieces: (pieces: LayoutPiece[]) => void;
   togglePoint: (id: string, next?: PointState) => PointState | undefined;
   toggleSignal: (id: string, next?: SignalState) => SignalState | undefined;
 }
@@ -253,7 +367,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timer);
   }, [hydrated, state.layout, state.circuitName]);
 
-  const selected = state.layout.pieces.find((piece) => piece.id === state.selectedId);
+  const selectedId = state.selectedIds.at(-1);
+  const selected = state.layout.pieces.find((piece) => piece.id === selectedId);
 
   const value = useMemo<EditorContextValue>(() => {
     return {
@@ -263,7 +378,9 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       addPiece: (piece) => dispatch({ type: "addPiece", piece }),
       updatePiece: (id, patch) => dispatch({ type: "updatePiece", id, patch }),
       replacePiece: (piece) => dispatch({ type: "replacePiece", piece }),
+      replacePieces: (pieces) => dispatch({ type: "replacePieces", pieces }),
       previewPiece: (piece) => dispatch({ type: "previewPiece", piece }),
+      previewPieces: (pieces) => dispatch({ type: "previewPieces", pieces }),
       togglePoint: (id, next) => {
         const piece = state.layout.pieces.find((item) => item.id === id);
         if (!piece || piece.type !== "point") return undefined;

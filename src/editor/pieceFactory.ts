@@ -1,10 +1,5 @@
-import {
-  curveSpec,
-  flippedPointSku,
-  isPointSku,
-  pointSpec,
-  signalSpec,
-} from "../catalog/lgb";
+import { curveSpec, flippedPointSku, isPointSku, pointSpec, signalSpec } from "../catalog/lgb";
+import { localToWorld, normalizeDeg, rotateLocal } from "../model/geometry";
 import type { Hand, LayoutPiece, Placing } from "../model/types";
 import { newPieceId } from "../model/types";
 
@@ -99,8 +94,37 @@ export function createPlacedPiece(
   };
 }
 
+export function flipPlacing(placing: Placing): Placing {
+  if (placing.type === "straight") {
+    return { ...placing, rotationDeg: normalizeDeg((placing.rotationDeg ?? 0) + 90) };
+  }
+  if (placing.type === "curve") {
+    return { ...placing, hand: placing.hand === "right" ? "left" : "right" };
+  }
+  if (placing.type === "point" && placing.sku && isPointSku(placing.sku)) {
+    const sku = flippedPointSku(placing.sku);
+    return { ...placing, sku, hand: pointSpec(sku)?.hand };
+  }
+  if (placing.type === "signal") {
+    return { ...placing, hand: placing.hand === "right" ? "left" : "right" };
+  }
+  return placing;
+}
+
 export function flipPiece(piece: LayoutPiece): LayoutPiece {
-  if (piece.type === "straight") return piece;
+  if (piece.type === "straight") {
+    const length = Math.max(1, piece.lengthMm ?? 300);
+    const mid = { x: length / 2, y: 0 };
+    const worldMid = localToWorld(piece, mid);
+    const rotationDeg = normalizeDeg(piece.rotationDeg + 90);
+    const rotatedMid = rotateLocal(mid.x, mid.y, rotationDeg);
+    return {
+      ...piece,
+      rotationDeg,
+      x: worldMid.x - rotatedMid.x,
+      y: worldMid.y - rotatedMid.y,
+    };
+  }
 
   if (piece.type === "curve") {
     const nextHand: Hand = piece.hand === "right" ? "left" : "right";
@@ -121,5 +145,6 @@ export function placingFromPiece(piece: LayoutPiece): Placing {
     sku: piece.sku,
     lengthMm: piece.lengthMm,
     hand: piece.hand,
+    rotationDeg: piece.rotationDeg,
   };
 }

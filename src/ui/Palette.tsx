@@ -91,7 +91,9 @@ export function Palette() {
       ))}
 
       <p className="hint">
-        Pieces snap at joiners. Signals stand upright above the track, or on the right of vertical track. F flips curves and points. Wheel zooms, drag empty canvas to pan.
+        Pieces snap at joiners. S and D cycle which end of the piece in your hand snaps (three on a
+        point). F flips curves and points; R rotates a selection 90°. Ctrl+C / Ctrl+V copy and paste.
+        Wheel zooms, drag empty canvas to box-select.
       </p>
     </aside>
   );

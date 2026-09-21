@@ -4,13 +4,37 @@ import { useEditor } from "../editor/store";
 import { mqttService } from "../mqtt/client";
 
 export function Inspector() {
-  const { selected, updatePiece, previewPiece, replacePiece, dispatch, mqttStatus } = useEditor();
+  const {
+    selected,
+    selectedIds,
+    layout,
+    updatePiece,
+    previewPiece,
+    replacePiece,
+    replacePieces,
+    dispatch,
+    mqttStatus,
+    editorMode,
+    clipboard,
+  } = useEditor();
+  const plan = editorMode === "plan";
 
   if (!selected) {
     return (
       <aside className="panel inspector">
         <h2>Inspector</h2>
-        <p className="hint">Select a piece to rename it, edit length, or set MQTT topics.</p>
+        <p className="hint">
+          {plan
+            ? "Box-select or Shift+click to group. Ctrl+C copies. Ctrl+V pastes onto the cursor — click to drop, R to rotate."
+            : "Click a point or signal to throw it. MQTT publishes if connected."}
+        </p>
+        {plan && clipboard.length > 0 ? (
+          <div className="row">
+            <button type="button" onClick={() => dispatch({ type: "pasteClipboard" })}>
+              Paste
+            </button>
+          </div>
+        ) : null}
       </aside>
     );
   }
@@ -19,6 +43,7 @@ export function Inspector() {
     <aside className="panel inspector">
       <h2>Inspector</h2>
       <p className="meta">{pieceLabel(selected)}</p>
+      {selectedIds.length > 1 ? <p className="hint">{selectedIds.length} selected</p> : null}
 
       <label className="field">
         <span>Name</span>
@@ -30,7 +55,7 @@ export function Inspector() {
         />
       </label>
 
-      {selected.type === "straight" && (
+      {plan && selected.type === "straight" && (
         <label className="field">
           <span>Length (mm)</span>
           <input
@@ -48,18 +73,38 @@ export function Inspector() {
         </label>
       )}
 
-      <div className="row">
-        <button type="button" onClick={() => replacePiece(flipPiece(selected))}>
-          Flip
-        </button>
-        <button
-          type="button"
-          className="danger"
-          onClick={() => dispatch({ type: "deleteSelected" })}
-        >
-          Delete
-        </button>
-      </div>
+      {plan && (
+        <div className="row">
+          <button
+            type="button"
+            onClick={() => {
+              const flipped = layout.pieces
+                .filter((piece) => selectedIds.includes(piece.id))
+                .map(flipPiece);
+              if (flipped.length === 1) replacePiece(flipped[0]);
+              else if (flipped.length) replacePieces(flipped);
+            }}
+          >
+            Flip
+          </button>
+          <button type="button" onClick={() => dispatch({ type: "rotateSelected", degrees: 90 })}>
+            Rotate 90°
+          </button>
+          <button type="button" onClick={() => dispatch({ type: "copySelected" })}>
+            Copy
+          </button>
+          <button
+            type="button"
+            disabled={clipboard.length === 0}
+            onClick={() => dispatch({ type: "pasteClipboard" })}
+          >
+            Paste
+          </button>
+          <button type="button" className="danger" onClick={() => dispatch({ type: "deleteSelected" })}>
+            Delete
+          </button>
+        </div>
+      )}
 
       {selected.type === "point" && (
         <>
@@ -94,61 +139,65 @@ export function Inspector() {
             Or flick the lever on the point. MQTT {mqttStatus === "connected" ? "will publish" : "is offline"}.
           </p>
 
-          <h3>MQTT</h3>
-          <label className="field">
-            <span>Command topic</span>
-            <input
-              type="text"
-              value={selected.mqtt?.topic ?? ""}
-              placeholder="garden/points/yard-1/set"
-              onChange={(event) =>
-                previewPiece({
-                  ...selected,
-                  mqtt: { ...emptyMqtt(selected), topic: event.target.value },
-                })
-              }
-            />
-          </label>
-          <label className="field">
-            <span>Payload — through</span>
-            <input
-              type="text"
-              value={selected.mqtt?.payloadThrough ?? "through"}
-              onChange={(event) =>
-                previewPiece({
-                  ...selected,
-                  mqtt: { ...emptyMqtt(selected), payloadThrough: event.target.value },
-                })
-              }
-            />
-          </label>
-          <label className="field">
-            <span>Payload — diverge</span>
-            <input
-              type="text"
-              value={selected.mqtt?.payloadDiverge ?? "diverge"}
-              onChange={(event) =>
-                previewPiece({
-                  ...selected,
-                  mqtt: { ...emptyMqtt(selected), payloadDiverge: event.target.value },
-                })
-              }
-            />
-          </label>
-          <label className="field">
-            <span>Status topic (optional)</span>
-            <input
-              type="text"
-              value={selected.mqtt?.statusTopic ?? ""}
-              placeholder="garden/points/yard-1/state"
-              onChange={(event) =>
-                previewPiece({
-                  ...selected,
-                  mqtt: { ...emptyMqtt(selected), statusTopic: event.target.value },
-                })
-              }
-            />
-          </label>
+          {plan && (
+            <>
+              <h3>MQTT</h3>
+              <label className="field">
+                <span>Command topic</span>
+                <input
+                  type="text"
+                  value={selected.mqtt?.topic ?? ""}
+                  placeholder="garden/points/yard-1/set"
+                  onChange={(event) =>
+                    previewPiece({
+                      ...selected,
+                      mqtt: { ...emptyMqtt(selected), topic: event.target.value },
+                    })
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Payload — through</span>
+                <input
+                  type="text"
+                  value={selected.mqtt?.payloadThrough ?? "through"}
+                  onChange={(event) =>
+                    previewPiece({
+                      ...selected,
+                      mqtt: { ...emptyMqtt(selected), payloadThrough: event.target.value },
+                    })
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Payload — diverge</span>
+                <input
+                  type="text"
+                  value={selected.mqtt?.payloadDiverge ?? "diverge"}
+                  onChange={(event) =>
+                    previewPiece({
+                      ...selected,
+                      mqtt: { ...emptyMqtt(selected), payloadDiverge: event.target.value },
+                    })
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Status topic (optional)</span>
+                <input
+                  type="text"
+                  value={selected.mqtt?.statusTopic ?? ""}
+                  placeholder="garden/points/yard-1/state"
+                  onChange={(event) =>
+                    previewPiece({
+                      ...selected,
+                      mqtt: { ...emptyMqtt(selected), statusTopic: event.target.value },
+                    })
+                  }
+                />
+              </label>
+            </>
+          )}
         </>
       )}
 
@@ -185,61 +234,65 @@ export function Inspector() {
             Or click the signal head. MQTT {mqttStatus === "connected" ? "will publish" : "is offline"}.
           </p>
 
-          <h3>MQTT</h3>
-          <label className="field">
-            <span>Command topic</span>
-            <input
-              type="text"
-              value={selected.mqtt?.topic ?? ""}
-              placeholder="garden/signals/home-1/set"
-              onChange={(event) =>
-                previewPiece({
-                  ...selected,
-                  mqtt: { ...emptyMqtt(selected), topic: event.target.value },
-                })
-              }
-            />
-          </label>
-          <label className="field">
-            <span>Payload — danger</span>
-            <input
-              type="text"
-              value={selected.mqtt?.payloadDanger ?? "danger"}
-              onChange={(event) =>
-                previewPiece({
-                  ...selected,
-                  mqtt: { ...emptyMqtt(selected), payloadDanger: event.target.value },
-                })
-              }
-            />
-          </label>
-          <label className="field">
-            <span>Payload — clear</span>
-            <input
-              type="text"
-              value={selected.mqtt?.payloadClear ?? "clear"}
-              onChange={(event) =>
-                previewPiece({
-                  ...selected,
-                  mqtt: { ...emptyMqtt(selected), payloadClear: event.target.value },
-                })
-              }
-            />
-          </label>
-          <label className="field">
-            <span>Status topic (optional)</span>
-            <input
-              type="text"
-              value={selected.mqtt?.statusTopic ?? ""}
-              placeholder="garden/signals/home-1/state"
-              onChange={(event) =>
-                previewPiece({
-                  ...selected,
-                  mqtt: { ...emptyMqtt(selected), statusTopic: event.target.value },
-                })
-              }
-            />
-          </label>
+          {plan && (
+            <>
+              <h3>MQTT</h3>
+              <label className="field">
+                <span>Command topic</span>
+                <input
+                  type="text"
+                  value={selected.mqtt?.topic ?? ""}
+                  placeholder="garden/signals/home-1/set"
+                  onChange={(event) =>
+                    previewPiece({
+                      ...selected,
+                      mqtt: { ...emptyMqtt(selected), topic: event.target.value },
+                    })
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Payload — danger</span>
+                <input
+                  type="text"
+                  value={selected.mqtt?.payloadDanger ?? "danger"}
+                  onChange={(event) =>
+                    previewPiece({
+                      ...selected,
+                      mqtt: { ...emptyMqtt(selected), payloadDanger: event.target.value },
+                    })
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Payload — clear</span>
+                <input
+                  type="text"
+                  value={selected.mqtt?.payloadClear ?? "clear"}
+                  onChange={(event) =>
+                    previewPiece({
+                      ...selected,
+                      mqtt: { ...emptyMqtt(selected), payloadClear: event.target.value },
+                    })
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Status topic (optional)</span>
+                <input
+                  type="text"
+                  value={selected.mqtt?.statusTopic ?? ""}
+                  placeholder="garden/signals/home-1/state"
+                  onChange={(event) =>
+                    previewPiece({
+                      ...selected,
+                      mqtt: { ...emptyMqtt(selected), statusTopic: event.target.value },
+                    })
+                  }
+                />
+              </label>
+            </>
+          )}
         </>
       )}
     </aside>

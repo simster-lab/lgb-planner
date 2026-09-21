@@ -1,40 +1,76 @@
 import { useEffect, useRef, useState } from "react";
 import { placeDebug, placeDebugOn, usePlaceDebugLog } from "../debug";
-import { clamp, lerp } from "../model/geometry";
+import { clamp, lerp, localToWorld, worldToLocal } from "../model/geometry";
 import { mqttService } from "../mqtt/client";
-import { createPlacedPiece, flipPiece, placingFromPiece } from "./pieceFactory";
-import { drawScene, hitTestLever, hitTestPiece, screenToWorld, signalHeadWorld } from "./render";
-import { freePorts, ghostAt, snapMovedPiece } from "./snap";
+import { createPlacedPiece, flipPiece, flipPlacing, placingFromPiece } from "./pieceFactory";
+import { liveSections } from "./liveRoutes";
+import {
+  boundsContain,
+  boundsIntersect,
+  drawScene,
+  hitTestLever,
+  hitTestPiece,
+  pieceBounds,
+  screenToWorld,
+  signalHeadWorld,
+  type Bounds,
+} from "./render";
+import { piecesAt } from "./selection";
+import { attachPortId, cyclePlacingSnap, freePorts, ghostAt, snapMovedPiece } from "./snap";
 import { useEditor } from "./store";
+import type { LayoutPiece } from "../model/types";
 
 const MIN_ZOOM = 0.08;
 const MAX_ZOOM = 3.2;
+const MARQUEE_PX = 8;
+
+type Drag =
+  | { mode: "pan"; lastX: number; lastY: number }
+  | {
+      mode: "move";
+      id: string;
+      grabX: number;
+      grabY: number;
+      orig: { id: string; x: number; y: number; rotationDeg: number }[];
+    }
+  | {
+      mode: "marquee";
+      startClientX: number;
+      startClientY: number;
+      currentClientX: number;
+      currentClientY: number;
+      startWorld: { x: number; y: number };
+      currentWorld: { x: number; y: number };
+      additive: boolean;
+    };
 
 export function EditorCanvas() {
   const {
     layout,
-    selectedId,
+    selectedIds,
     placing,
+    pasting,
     view,
+    editorMode,
     dispatch,
     addPiece,
     replacePiece,
-    previewPiece,
+    replacePieces,
+    previewPieces,
     togglePoint,
     toggleSignal,
   } = useEditor();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef(new Map<string, number>());
-  const dragRef = useRef<
-    | { mode: "pan"; lastX: number; lastY: number }
-    | { mode: "move"; id: string; grabX: number; grabY: number; origX: number; origY: number }
-    | null
-  >(null);
+  const dragRef = useRef<Drag | null>(null);
   const [ghost, setGhost] = useState<ReturnType<typeof ghostAt> | undefined>();
   const [hoverLeverId, setHoverLeverId] = useState<string | null>(null);
   const [cursorWorld, setCursorWorld] = useState({ x: 0, y: 0 });
+  const cursorRef = useRef(cursorWorld);
+  cursorRef.current = cursorWorld;
   const debugLog = usePlaceDebugLog();
   const debug = placeDebugOn();
+  const plan = editorMode === "plan";
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -60,6 +96,7 @@ export function EditorCanvas() {
         animRef.current.set(piece.id, Math.abs(next - target) < 0.005 ? target : next);
       }
 
+      const drag = dragRef.current;
       drawScene(
         ctx,
         layout.pieces,
@@ -67,11 +104,25 @@ export function EditorCanvas() {
         width,
         height,
         {
-          selectedId,
-          ghost: placing ? ghost : undefined,
-          freePorts: freePorts(layout.pieces),
+          selectedIds,
+          ghost: plan && placing ? ghost : undefined,
+          ghosts: plan && pasting ? piecesAt(pasting, cursorRef.current) : undefined,
+          freePorts: plan ? freePorts(layout.pieces) : [],
           anim: animRef.current,
           hoverLeverId,
+          editorMode,
+          liveSections: plan ? undefined : liveSections(layout.pieces),
+          attachPortId: plan && placing ? attachPortId(placing) : undefined,
+          marquee:
+            drag?.mode === "marquee"
+              ? {
+                  x0: drag.startWorld.x,
+                  y0: drag.startWorld.y,
+                  x1: drag.currentWorld.x,
+                  y1: drag.currentWorld.y,
+                  crossing: drag.currentClientX < drag.startClientX,
+                }
+              : undefined,
         },
         dpr,
       );
@@ -79,7 +130,38 @@ export function EditorCanvas() {
     };
     frame = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frame);
-  }, [ghost, hoverLeverId, layout.pieces, placing, selectedId, view]);
+  }, [editorMode, ghost, hoverLeverId, layout.pieces, pasting, placing, plan, selectedIds, view]);
+
+  useEffect(() => {
+    if (!plan || !placing) {
+      setGhost(undefined);
+      return;
+    }
+    setGhost(ghostAt(placing, layout.pieces, cursorWorld.x, cursorWorld.y));
+  }, [cursorWorld.x, cursorWorld.y, layout.pieces, placing, plan]);
+
+  useEffect(() => {
+    if (!plan || !placing) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      const key = event.key.toLowerCase();
+      if (key === "f") {
+        event.preventDefault();
+        dispatch({ type: "setPlacing", placing: flipPlacing(placing) });
+        return;
+      }
+      if (placing.type === "signal") return;
+      if (key === "d" || key === "s") {
+        event.preventDefault();
+        dispatch({
+          type: "setPlacing",
+          placing: cyclePlacingSnap(placing, key === "d" ? 1 : -1),
+        });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [dispatch, placing, plan]);
 
   const eventWorld = (event: { clientX: number; clientY: number; currentTarget: HTMLCanvasElement }) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -126,11 +208,20 @@ export function EditorCanvas() {
 
   const cancelPlacing = () => {
     dispatch({ type: "setPlacing", placing: null });
+    dispatch({ type: "setPasting", pieces: null });
     setGhost(undefined);
   };
 
+  const commitPaste = (world: { x: number; y: number }) => {
+    if (!plan || !pasting?.length) return;
+    const now = performance.now();
+    if (now - lastPlaceMs.current < 150) return;
+    lastPlaceMs.current = now;
+    dispatch({ type: "addPieces", pieces: piecesAt(pasting, world) });
+  };
+
   const commitPlace = (world: { x: number; y: number }, source: string) => {
-    if (!placing) {
+    if (!plan || !placing) {
       placeDebug(`${source} commitPlace skipped (not placing)`);
       return;
     }
@@ -156,13 +247,32 @@ export function EditorCanvas() {
   const isPrimaryButton = (event: { button: number; pointerType?: string }) =>
     event.button === 0 || event.pointerType === "touch" || event.pointerType === "pen";
 
+  const capture = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Some browsers throw here on HTTP / canvas; drag still works via move/up.
+    }
+  };
+
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const world = eventWorld(event);
     placeDebug(
-      `pointerdown button=${event.button} type=${event.pointerType} placing=${Boolean(placing)}`,
+      `pointerdown button=${event.button} type=${event.pointerType} placing=${Boolean(placing)} pasting=${Boolean(pasting)} mode=${editorMode}`,
     );
 
-    if (placing) {
+    if (plan && pasting) {
+      event.preventDefault();
+      if (event.button === 2) {
+        cancelPlacing();
+        return;
+      }
+      if (isPrimaryButton(event)) commitPaste(world);
+      return;
+    }
+
+    if (plan && placing) {
+      event.preventDefault();
       if (event.button === 2) {
         cancelPlacing();
         placeDebug("pointerdown cancel placing");
@@ -173,15 +283,16 @@ export function EditorCanvas() {
       return;
     }
 
-    try {
-      event.currentTarget.setPointerCapture(event.pointerId);
-    } catch {
-      // Some browsers throw here on HTTP / canvas; drag still works via move/up.
+    capture(event);
+
+    if (event.button === 2 || event.button === 1) {
+      dragRef.current = { mode: "pan", lastX: event.clientX, lastY: event.clientY };
+      return;
     }
 
     const lever = leverAt(world);
     if (lever && event.button === 0) {
-      dispatch({ type: "select", id: lever.id });
+      dispatch({ type: "select", id: lever.id, additive: event.shiftKey && plan });
       if (lever.type === "signal") throwSignal(lever.id);
       else throwPoint(lever.id);
       return;
@@ -189,18 +300,43 @@ export function EditorCanvas() {
 
     const hit = pieceAt(world);
     if (hit && event.button === 0) {
-      dispatch({ type: "select", id: hit.id });
-      dragRef.current = {
-        mode: "move",
-        id: hit.id,
-        grabX: world.x,
-        grabY: world.y,
-        origX: hit.x,
-        origY: hit.y,
-      };
+      const additive = event.shiftKey && plan;
+      if (additive) {
+        dispatch({ type: "select", id: hit.id, additive: true });
+        if (selectedIds.includes(hit.id)) return;
+      } else if (!selectedIds.includes(hit.id)) {
+        dispatch({ type: "select", id: hit.id });
+      }
+      if (plan) {
+        const group = additive || selectedIds.includes(hit.id) ? [...new Set([...selectedIds, hit.id])] : [hit.id];
+        dragRef.current = {
+          mode: "move",
+          id: hit.id,
+          grabX: world.x,
+          grabY: world.y,
+          orig: layout.pieces
+            .filter((piece) => group.includes(piece.id))
+            .map((piece) => ({ id: piece.id, x: piece.x, y: piece.y, rotationDeg: piece.rotationDeg })),
+        };
+      }
       return;
     }
 
+    if (event.button !== 0) return;
+    if (plan) {
+      dragRef.current = {
+        mode: "marquee",
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        currentClientX: event.clientX,
+        currentClientY: event.clientY,
+        startWorld: world,
+        currentWorld: world,
+        additive: event.shiftKey,
+      };
+      if (!event.shiftKey) dispatch({ type: "select", id: null });
+      return;
+    }
     dispatch({ type: "select", id: null });
     dragRef.current = { mode: "pan", lastX: event.clientX, lastY: event.clientY };
   };
@@ -210,7 +346,7 @@ export function EditorCanvas() {
     setCursorWorld(world);
     setHoverLeverId(placing ? null : (leverAt(world)?.id ?? null));
 
-    if (placing) {
+    if (plan && placing) {
       setGhost(ghostAt(placing, layout.pieces, world.x, world.y));
     }
 
@@ -227,31 +363,100 @@ export function EditorCanvas() {
       drag.lastY = event.clientY;
       return;
     }
+    if (drag.mode === "marquee") {
+      drag.currentWorld = world;
+      drag.currentClientX = event.clientX;
+      drag.currentClientY = event.clientY;
+      return;
+    }
 
-    const piece = layout.pieces.find((item) => item.id === drag.id);
-    if (!piece) return;
-    previewPiece({
-      ...piece,
-      x: drag.origX + (world.x - drag.grabX),
-      y: drag.origY + (world.y - drag.grabY),
-    });
+    const dx = world.x - drag.grabX;
+    const dy = world.y - drag.grabY;
+    const next: LayoutPiece[] = [];
+    for (const orig of drag.orig) {
+      const piece = layout.pieces.find((item) => item.id === orig.id);
+      if (!piece) continue;
+      next.push({ ...piece, x: orig.x + dx, y: orig.y + dy });
+    }
+    if (next.length) previewPieces(next);
+  };
+
+  const finishMarquee = (drag: Extract<Drag, { mode: "marquee" }>) => {
+    const dist = Math.hypot(
+      drag.currentClientX - drag.startClientX,
+      drag.currentClientY - drag.startClientY,
+    );
+    if (dist < MARQUEE_PX) {
+      if (!drag.additive) dispatch({ type: "select", id: null });
+      return;
+    }
+    const box: Bounds = {
+      minX: Math.min(drag.startWorld.x, drag.currentWorld.x),
+      minY: Math.min(drag.startWorld.y, drag.currentWorld.y),
+      maxX: Math.max(drag.startWorld.x, drag.currentWorld.x),
+      maxY: Math.max(drag.startWorld.y, drag.currentWorld.y),
+    };
+    const crossing = drag.currentClientX < drag.startClientX;
+    const hit = layout.pieces
+      .filter((piece) => {
+        const bounds = pieceBounds(piece);
+        return crossing ? boundsIntersect(box, bounds) : boundsContain(box, bounds);
+      })
+      .map((piece) => piece.id);
+    const ids = drag.additive ? [...new Set([...selectedIds, ...hit])] : hit;
+    dispatch({ type: "setSelection", ids });
   };
 
   const onPointerUp = () => {
     const drag = dragRef.current;
     dragRef.current = null;
-    if (drag?.mode !== "move") return;
-    const piece = layout.pieces.find((item) => item.id === drag.id);
-    if (!piece) return;
+    if (!drag) return;
+    if (drag.mode === "marquee") {
+      finishMarquee(drag);
+      return;
+    }
+    if (drag.mode !== "move") return;
+    const grab = layout.pieces.find((item) => item.id === drag.id);
+    const origGrab = drag.orig.find((item) => item.id === drag.id);
+    if (!grab || !origGrab) return;
+    const selected = new Set(drag.orig.map((item) => item.id));
     const snapped = snapMovedPiece(
-      piece,
-      layout.pieces.filter((item) => item.id !== piece.id),
+      grab,
+      layout.pieces.filter((item) => !selected.has(item.id)),
     );
+    const dRot = snapped.rotationDeg - origGrab.rotationDeg;
     const moved =
-      snapped.x !== drag.origX ||
-      snapped.y !== drag.origY ||
-      snapped.rotationDeg !== piece.rotationDeg;
-    if (moved) replacePiece(snapped);
+      Math.hypot(snapped.x - origGrab.x, snapped.y - origGrab.y) > 0.4 || Math.abs(dRot) > 0.2;
+    if (!moved) {
+      const restored: LayoutPiece[] = [];
+      for (const orig of drag.orig) {
+        const piece = layout.pieces.find((item) => item.id === orig.id);
+        if (piece) restored.push({ ...piece, x: orig.x, y: orig.y, rotationDeg: orig.rotationDeg });
+      }
+      if (restored.length) previewPieces(restored);
+      return;
+    }
+    const next: LayoutPiece[] = [];
+    for (const orig of drag.orig) {
+      const piece = layout.pieces.find((item) => item.id === orig.id);
+      if (!piece) continue;
+      if (orig.id === grab.id) {
+        next.push({ ...piece, ...snapped, id: piece.id, type: piece.type });
+        continue;
+      }
+      const local = worldToLocal(
+        { x: origGrab.x, y: origGrab.y, rotationDeg: origGrab.rotationDeg },
+        { x: orig.x, y: orig.y },
+      );
+      const world = localToWorld(snapped, local);
+      next.push({
+        ...piece,
+        x: world.x,
+        y: world.y,
+        rotationDeg: orig.rotationDeg + dRot,
+      });
+    }
+    replacePieces(next);
   };
 
   const onWheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
@@ -270,41 +475,42 @@ export function EditorCanvas() {
     <div className="canvas-wrap">
       <canvas
         ref={canvasRef}
-        className={placing ? "placing" : hoverLeverId ? "lever" : ""}
+        className={plan && (placing || pasting) ? "placing" : hoverLeverId ? "lever" : ""}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
-        onClick={(event) => {
-          placeDebug(`click placing=${Boolean(placing)}`);
-          if (!placing) return;
-          commitPlace(eventWorld(event), "click");
-        }}
         onContextMenu={(event) => event.preventDefault()}
         onWheel={onWheel}
         onDoubleClick={() => {
-          placeDebug(`dblclick placing=${Boolean(placing)} selected=${selectedId ?? "none"}`);
-          if (selectedId) {
-            const piece = layout.pieces.find((item) => item.id === selectedId);
-            if (piece) replacePiece(flipPiece(piece));
+          placeDebug(`dblclick placing=${Boolean(placing)} selected=${selectedIds.join(",") || "none"}`);
+          if (!plan) return;
+          if (selectedIds.length) {
+            const flipped = layout.pieces.filter((item) => selectedIds.includes(item.id)).map(flipPiece);
+            if (flipped.length === 1) replacePiece(flipped[0]);
+            else replacePieces(flipped);
           } else if (placing) {
-            dispatch({
-              type: "setPlacing",
-              placing: { ...placing, hand: placing.hand === "right" ? "left" : "right" },
-            });
-            setGhost(ghostAt(
-              { ...placing, hand: placing.hand === "right" ? "left" : "right" },
-              layout.pieces,
-              cursorWorld.x,
-              cursorWorld.y,
-            ));
+            dispatch({ type: "setPlacing", placing: flipPlacing(placing) });
           }
         }}
       />
-      {placing && (
+      {plan && pasting && (
         <div className="canvas-hint">
-          Click to place · Esc cancel · F or double-click to flip · Right-click cancel
+          Click to drop the copy · R rotate 90° · Esc or right-click cancel
         </div>
+      )}
+      {plan && placing && !pasting && (
+        <div className="canvas-hint">
+          Click to place · Esc cancel · F flip / rotate · S / D cycle this piece's joiner · Right-click cancel
+        </div>
+      )}
+      {plan && !placing && !pasting && (
+        <div className="canvas-hint">
+          Drag empty canvas to box-select · Shift+click add · Ctrl+C/V copy · R rotate · Right-drag pan
+        </div>
+      )}
+      {!plan && (
+        <div className="canvas-hint">Click levers and signals to throw · Drag empty canvas to pan</div>
       )}
       {debug && (
         <pre className="place-debug">

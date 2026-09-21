@@ -17,7 +17,7 @@ import {
 } from "../persist/remote";
 
 export function Toolbar() {
-  const { layout, mqttStatus, circuitName, dispatch } = useEditor();
+  const { layout, mqttStatus, circuitName, editorMode, dispatch } = useEditor();
   const importRef = useRef<HTMLInputElement>(null);
   const mqtt = layout.settings.mqtt ?? defaultBrokerConfig();
   const [openOpen, setOpenOpen] = useState(false);
@@ -176,6 +176,22 @@ export function Toolbar() {
             }
           }}
         />
+        <div className="mode-toggle" role="group" aria-label="Editor mode">
+          <button
+            type="button"
+            className={editorMode === "plan" ? "active" : ""}
+            onClick={() => dispatch({ type: "setEditorMode", mode: "plan" })}
+          >
+            Plan
+          </button>
+          <button
+            type="button"
+            className={editorMode === "run" ? "active" : ""}
+            onClick={() => dispatch({ type: "setEditorMode", mode: "run" })}
+          >
+            Run
+          </button>
+        </div>
         <button
           type="button"
           className={mqttStatus === "connected" ? "active" : ""}
