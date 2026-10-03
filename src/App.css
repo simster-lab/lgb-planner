@@ -294,34 +294,140 @@ canvas.lever {
   padding: 18px;
 }
 
-.throttle {
+.throttle-dock {
   display: flex;
-  gap: 16px;
-  align-items: stretch;
-  padding: 8px 14px 10px;
+  flex-direction: column;
   background: #242b20;
   border-top: 1px solid #3d4a32;
   min-height: 0;
 }
 
-.throttle-speed-wrap {
-  flex: 0 0 auto;
+.throttle-power-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 14px;
+  border-bottom: 1px solid #3d4a32;
 }
 
-.throttle-speed-label {
+.power-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #cfc3a4;
+}
+
+.power-switch input[type="checkbox"] {
+  appearance: none;
+  width: 40px;
+  height: 22px;
+  margin: 0;
+  background: #151910;
+  border: 1px solid #4a5740;
+  border-radius: 999px;
+  position: relative;
+  cursor: pointer;
+}
+
+.power-switch input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #cfc3a4;
+  transition: left 0.12s ease;
+}
+
+.power-switch input[type="checkbox"]:checked {
+  background: #4a3a1c;
+  border-color: #c4a35a;
+}
+
+.power-switch input[type="checkbox"]:checked::after {
+  left: 20px;
+  background: #f3e2b0;
+}
+
+.power-switch input[type="checkbox"]:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.throttle-cards {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  padding: 8px 14px 10px;
+  overflow-x: auto;
+}
+
+.throttle-card {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+  flex: 0 0 auto;
+  position: relative;
+  padding: 10px 12px;
+  background: #1e241c;
+  border: 1px solid #3d4a32;
+  border-radius: 8px;
+}
+
+.throttle-card-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.throttle-add {
+  flex: 0 0 auto;
+  align-self: center;
+  min-height: 72px;
+}
+
+.throttle-speed-wrap {
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
+}
+
+.throttle-speed-caption {
   font-size: 12px;
   color: #cfc3a4;
+}
+
+.throttle-speed-grad {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.throttle-speed-ticks {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 22px;
+  font-size: 10px;
+  line-height: 1;
+  color: #b5aa8e;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .throttle-speed {
   writing-mode: vertical-lr;
   direction: rtl;
-  height: 132px;
-  width: 28px;
+  height: 168px;
+  width: 48px;
   accent-color: #c4a35a;
 }
 
@@ -336,7 +442,7 @@ canvas.lever {
   flex-direction: column;
   justify-content: center;
   gap: 8px;
-  min-width: 0;
+  min-width: 196px;
 }
 
 .throttle-row {
@@ -351,10 +457,20 @@ canvas.lever {
   margin-bottom: 0;
 }
 
+.throttle-fns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(48px, 1fr));
+  gap: 6px;
+}
+
 .throttle-fns button {
-  min-width: 40px;
+  min-width: 0;
   padding: 6px 8px;
   font-size: 12px;
+}
+
+.throttle-fn-light {
+  grid-column: 1 / -1;
 }
 
 .status {

@@ -1,99 +1,131 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { dccexService } from "../dccex/client";
 import { useEditor } from "../editor/store";
 import { DraftNumberInput } from "./DraftNumberInput";
 
-const FUNC_COUNT = 13;
-const MAX_SPEED = 126;
+const FUNC_COUNT = 10;
+const SPEED_UI_MAX = 100;
+const SPEED_DCC_MAX = 126;
+const SPEED_TICKS = [100, 75, 50, 25, 0] as const;
 
-export function Throttle() {
-  const { dccexStatus } = useEditor();
-  const connected = dccexStatus === "connected";
-  const [cab, setCab] = useState<number | null>(3);
-  const [acquired, setAcquired] = useState(false);
-  const [speed, setSpeed] = useState(0);
-  const [forward, setForward] = useState(true);
-  const [functions, setFunctions] = useState(() => Array.from({ length: FUNC_COUNT }, () => false));
-  const [powerOn, setPowerOn] = useState(false);
+type CabCard = {
+  id: string;
+  cab: number | null;
+  acquired: boolean;
+  speed: number;
+  forward: boolean;
+  functions: boolean[];
+};
 
-  useEffect(() => {
-    dccexService.onPower((on) => setPowerOn(on));
-  }, []);
-
-  useEffect(() => {
-    if (!connected) setAcquired(false);
-  }, [connected]);
-
-  const live = connected && acquired && cab != null;
-
-  const sendThrottle = (nextSpeed: number, nextForward: boolean, address = cab) => {
-    if (address == null) return;
-    const dir = nextForward ? 1 : 0;
-    dccexService.send(`<t ${address} ${nextSpeed} ${dir}>`);
+function newCard(cab: number | null): CabCard {
+  return {
+    id: crypto.randomUUID(),
+    cab,
+    acquired: false,
+    speed: 0,
+    forward: true,
+    functions: Array.from({ length: FUNC_COUNT }, () => false),
   };
+}
 
-  const dispenseCab = (address: number | null) => {
+function toDccSpeed(percent: number): number {
+  const clamped = Math.max(0, Math.min(SPEED_UI_MAX, percent));
+  return Math.round((clamped * SPEED_DCC_MAX) / SPEED_UI_MAX);
+}
+
+function sendCabThrottle(address: number, speedPercent: number, forward: boolean): void {
+  const dir = forward ? 1 : 0;
+  dccexService.send(`<t ${address} ${toDccSpeed(speedPercent)} ${dir}>`);
+}
+
+function ThrottleCard({
+  card,
+  connected,
+  canRemove,
+  onChange,
+  onRemove,
+}: {
+  card: CabCard;
+  connected: boolean;
+  canRemove: boolean;
+  onChange: (next: CabCard) => void;
+  onRemove: () => void;
+}) {
+  const live = connected && card.acquired && card.cab != null;
+
+  const patch = (next: Partial<CabCard>) => onChange({ ...card, ...next });
+
+  const dispense = (address: number | null, keepAddress = card.cab) => {
     if (connected && address != null) {
-      const dir = forward ? 1 : 0;
-      dccexService.send(`<t ${address} 0 ${dir}>`);
+      dccexService.send(`<t ${address} 0 ${card.forward ? 1 : 0}>`);
       dccexService.send(`<- ${address}>`);
     }
-    setSpeed(0);
-    setAcquired(false);
+    patch({ cab: keepAddress, acquired: false, speed: 0 });
   };
 
   const setCabAddress = (next: number | null) => {
-    if (next === cab) return;
-    if (acquired) dispenseCab(cab);
-    setCab(next);
+    if (next === card.cab) return;
+    if (card.acquired) dispense(card.cab, next);
+    else patch({ cab: next });
   };
 
-  const acquireCab = () => {
-    if (!connected || cab == null) return;
-    dccexService.send(`<t ${cab}>`);
-    sendThrottle(speed, forward);
-    setAcquired(true);
+  const acquire = () => {
+    if (!connected || card.cab == null) return;
+    dccexService.send(`<t ${card.cab}>`);
+    sendCabThrottle(card.cab, card.speed, card.forward);
+    patch({ acquired: true });
   };
 
-  const setSpeedAndSend = (next: number) => {
-    const speedValue = Math.max(0, Math.min(MAX_SPEED, next));
-    setSpeed(speedValue);
-    if (live) sendThrottle(speedValue, forward);
+  const setSpeed = (next: number) => {
+    const speed = Math.max(0, Math.min(SPEED_UI_MAX, next));
+    patch({ speed });
+    if (live && card.cab != null) sendCabThrottle(card.cab, speed, card.forward);
   };
 
-  const setDirection = (nextForward: boolean) => {
-    setForward(nextForward);
-    if (live) sendThrottle(speed, nextForward);
+  const setDirection = (forward: boolean) => {
+    patch({ forward });
+    if (live && card.cab != null) sendCabThrottle(card.cab, card.speed, forward);
   };
 
   const toggleFn = (index: number) => {
-    const next = !functions[index];
-    setFunctions((prev) => prev.map((on, i) => (i === index ? next : on)));
-    if (live) dccexService.send(`<F ${cab} ${index} ${next ? 1 : 0}>`);
-  };
-
-  const setPower = (on: boolean) => {
-    setPowerOn(on);
-    if (connected) dccexService.send(on ? "<1>" : "<0>");
+    const next = !card.functions[index];
+    patch({ functions: card.functions.map((on, i) => (i === index ? next : on)) });
+    if (live && card.cab != null) dccexService.send(`<F ${card.cab} ${index} ${next ? 1 : 0}>`);
   };
 
   return (
-    <aside className="throttle" aria-label="DCC-EX throttle">
+    <section className="throttle-card" aria-label={card.cab == null ? "Throttle" : `Cab ${card.cab}`}>
+      {canRemove ? (
+        <button type="button" className="throttle-card-remove" onClick={onRemove} aria-label="Remove throttle">
+          Remove
+        </button>
+      ) : null}
+
       <div className="throttle-speed-wrap">
-        <label className="throttle-speed-label">
-          Speed
+        <span className="throttle-speed-caption">Speed</span>
+        <div className="throttle-speed-grad">
+          <div className="throttle-speed-ticks" aria-hidden="true">
+            {SPEED_TICKS.map((tick) => (
+              <span key={tick}>{tick}</span>
+            ))}
+          </div>
           <input
             type="range"
             className="throttle-speed"
             min={0}
-            max={MAX_SPEED}
-            value={speed}
+            max={SPEED_UI_MAX}
+            step={1}
+            value={card.speed}
             disabled={!live}
-            aria-valuetext={`${speed}`}
-            onChange={(event) => setSpeedAndSend(Number(event.target.value))}
+            aria-label="Speed"
+            aria-valuemin={0}
+            aria-valuemax={SPEED_UI_MAX}
+            aria-valuenow={card.speed}
+            aria-valuetext={`${card.speed}`}
+            onChange={(event) => setSpeed(Number(event.target.value))}
           />
-          <span className="throttle-speed-value">{speed}</span>
-        </label>
+        </div>
+        <span className="throttle-speed-value">{card.speed}</span>
       </div>
 
       <div className="throttle-main">
@@ -101,7 +133,7 @@ export function Throttle() {
           <label className="field throttle-cab">
             <span>DCC address</span>
             <DraftNumberInput
-              value={cab}
+              value={card.cab}
               min={1}
               max={10239}
               restoreOnEmptyBlur={false}
@@ -110,62 +142,139 @@ export function Throttle() {
           </label>
           <button
             type="button"
-            className={acquired ? "active" : ""}
-            disabled={!connected || cab == null || acquired}
-            onClick={acquireCab}
+            className={card.acquired ? "active" : ""}
+            disabled={!connected || card.cab == null || card.acquired}
+            onClick={acquire}
           >
             Acquire
           </button>
           <button
             type="button"
-            className={!acquired ? "active" : ""}
-            disabled={!connected || !acquired}
-            onClick={() => dispenseCab(cab)}
+            className={!card.acquired ? "active" : ""}
+            disabled={!connected || !card.acquired}
+            onClick={() => dispense(card.cab)}
           >
             Dispense
           </button>
-          <button type="button" className={forward ? "active" : ""} disabled={!live} onClick={() => setDirection(true)}>
+          <button type="button" className={card.forward ? "active" : ""} disabled={!live} onClick={() => setDirection(true)}>
             Forward
           </button>
-          <button type="button" className={!forward ? "active" : ""} disabled={!live} onClick={() => setDirection(false)}>
+          <button
+            type="button"
+            className={!card.forward ? "active" : ""}
+            disabled={!live}
+            onClick={() => setDirection(false)}
+          >
             Reverse
           </button>
-          <button type="button" disabled={!live} onClick={() => setSpeedAndSend(0)}>
+          <button type="button" disabled={!live} onClick={() => setSpeed(0)}>
             Stop
           </button>
         </div>
 
-        <div className="throttle-row throttle-fns" role="group" aria-label="Functions">
-          {functions.map((on, index) => (
-            <button
-              key={index}
-              type="button"
-              className={on ? "active" : ""}
-              disabled={!live}
-              onClick={() => toggleFn(index)}
-            >
-              F{index}
-            </button>
-          ))}
+        <div className="throttle-fns" role="group" aria-label="Functions">
+          <button
+            type="button"
+            className={`throttle-fn-light${card.functions[0] ? " active" : ""}`}
+            disabled={!live}
+            onClick={() => toggleFn(0)}
+          >
+            Light
+          </button>
+          {card.functions.slice(1).map((on, offset) => {
+            const index = offset + 1;
+            return (
+              <button key={index} type="button" className={on ? "active" : ""} disabled={!live} onClick={() => toggleFn(index)}>
+                F{index}
+              </button>
+            );
+          })}
         </div>
+      </div>
+    </section>
+  );
+}
 
-        <div className="throttle-row">
-          <button type="button" className={powerOn ? "active" : ""} disabled={!connected} onClick={() => setPower(true)}>
-            Track power on
-          </button>
-          <button type="button" className={!powerOn ? "active" : ""} disabled={!connected} onClick={() => setPower(false)}>
-            Track power off
-          </button>
-          <span className="hint">
-            {!connected
-              ? "Connect DCC-EX to drive"
-              : cab == null
-                ? "Enter a DCC address"
-                : acquired
-                  ? `Cab ${cab} acquired`
-                  : `Acquire cab ${cab} to drive`}
-          </span>
-        </div>
+export function Throttle() {
+  const { dccexStatus } = useEditor();
+  const connected = dccexStatus === "connected";
+  const powerSwitchId = useId();
+  const [powerOn, setPowerOn] = useState(false);
+  const [cards, setCards] = useState<CabCard[]>(() => [newCard(3)]);
+
+  useEffect(() => {
+    dccexService.onPower((on) => setPowerOn(on));
+  }, []);
+
+  useEffect(() => {
+    if (!connected) {
+      setCards((prev) => prev.map((card) => (card.acquired ? { ...card, acquired: false } : card)));
+    }
+  }, [connected]);
+
+  const updateCard = (id: string, next: CabCard) => {
+    setCards((prev) => prev.map((card) => (card.id === id ? next : card)));
+  };
+
+  const addCard = () => {
+    setCards((prev) => [...prev, newCard(null)]);
+  };
+
+  const removeCard = (id: string) => {
+    setCards((prev) => {
+      if (prev.length <= 1) return prev;
+      const card = prev.find((item) => item.id === id);
+      if (card?.acquired && card.cab != null && connected) {
+        dccexService.send(`<t ${card.cab} 0 ${card.forward ? 1 : 0}>`);
+        dccexService.send(`<- ${card.cab}>`);
+      }
+      return prev.filter((item) => item.id !== id);
+    });
+  };
+
+  const setPower = (on: boolean) => {
+    setPowerOn(on);
+    if (connected) dccexService.send(on ? "<1>" : "<0>");
+  };
+
+  const emergencyStop = () => {
+    if (connected) dccexService.send("<!>");
+    setCards((prev) => prev.map((card) => (card.speed === 0 ? card : { ...card, speed: 0 })));
+  };
+
+  return (
+    <aside className="throttle-dock" aria-label="DCC-EX controls">
+      <div className="throttle-power-bar">
+        <label className="power-switch" htmlFor={powerSwitchId}>
+          <input
+            id={powerSwitchId}
+            type="checkbox"
+            checked={powerOn}
+            disabled={!connected}
+            onChange={(event) => setPower(event.target.checked)}
+          />
+          <span>Track power {powerOn ? "on" : "off"}</span>
+        </label>
+        <button type="button" className="danger" disabled={!connected} onClick={emergencyStop}>
+          Emergency stop
+        </button>
+        <span className="hint">{connected ? "DCC-EX connected" : "Connect DCC-EX to drive"}</span>
+      </div>
+
+      <div className="throttle-cards">
+        {cards.map((card) => (
+          <ThrottleCard
+            key={card.id}
+            card={card}
+            connected={connected}
+            canRemove={cards.length > 1}
+            onChange={(next) => updateCard(card.id, next)}
+            onRemove={() => removeCard(card.id)}
+          />
+        ))}
+        <button type="button" className="throttle-add" onClick={addCard}>
+          Add throttle
+        </button>
       </div>
     </aside>
   );
