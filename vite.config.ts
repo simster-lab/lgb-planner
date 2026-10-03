@@ -16,6 +16,7 @@ export default defineConfig({
     proxy: {
       "/api": "http://127.0.0.1:8080",
       "/mqtt": { target: "http://127.0.0.1:8080", ws: true },
+      "/dccex": { target: "http://127.0.0.1:8080", ws: true },
     },
   },
 });

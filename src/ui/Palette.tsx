@@ -1,6 +1,7 @@
 import { CURVES, POINTS, SIGNALS } from "../catalog/lgb";
 import { useEditor } from "../editor/store";
 import type { CatalogSku, Placing } from "../model/types";
+import { DraftNumberInput } from "./DraftNumberInput";
 
 const CURVE_ORDER = ["11000", "15000", "16000"] as const;
 const POINT_ORDER = ["12100", "12000", "16140", "16040"] as const;
@@ -34,18 +35,17 @@ export function Palette() {
       </button>
       <label className="field">
         <span>Length (mm)</span>
-        <input
-          type="number"
+        <DraftNumberInput
+          value={length}
           min={10}
           max={8000}
           step={1}
-          value={length}
-          onChange={(event) => {
-            const lengthMm = Math.max(1, Number(event.target.value) || 300);
+          onValue={(next) => {
+            if (next == null) return;
             if (placing?.type === "straight") {
-              dispatch({ type: "setPlacing", placing: { ...placing, lengthMm } });
+              dispatch({ type: "setPlacing", placing: { ...placing, lengthMm: next } });
             } else {
-              dispatch({ type: "setPlacing", placing: { type: "straight", lengthMm } });
+              dispatch({ type: "setPlacing", placing: { type: "straight", lengthMm: next } });
             }
           }}
         />

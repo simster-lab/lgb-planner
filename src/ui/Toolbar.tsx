@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
 import { useEditor } from "../editor/store";
 import { mqttService } from "../mqtt/client";
-import { defaultBrokerConfig } from "../model/types";
+import { dccexService } from "../dccex/client";
+import { defaultBrokerConfig, defaultDccexConfig } from "../model/types";
 import {
   circuitNameFromFilename,
   downloadLayout,
@@ -17,9 +18,10 @@ import {
 } from "../persist/remote";
 
 export function Toolbar() {
-  const { layout, mqttStatus, circuitName, editorMode, dispatch } = useEditor();
+  const { layout, mqttStatus, dccexStatus, circuitName, editorMode, dispatch } = useEditor();
   const importRef = useRef<HTMLInputElement>(null);
   const mqtt = layout.settings.mqtt ?? defaultBrokerConfig();
+  const dccex = layout.settings.dccex ?? defaultDccexConfig();
   const [openOpen, setOpenOpen] = useState(false);
   const [names, setNames] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -201,6 +203,16 @@ export function Toolbar() {
           }}
         >
           {mqttStatus === "connected" ? "MQTT connected" : "MQTT connect"}
+        </button>
+        <button
+          type="button"
+          className={dccexStatus === "connected" ? "active" : ""}
+          onClick={() => {
+            if (dccexService.isConnected()) dccexService.disconnect();
+            else dccexService.connect(dccex);
+          }}
+        >
+          {dccexStatus === "connected" ? "DCC-EX connected" : "DCC-EX connect"}
         </button>
         <button type="button" onClick={() => dispatch({ type: "setSettingsOpen", open: true })}>
           Settings

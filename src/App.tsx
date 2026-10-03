@@ -3,9 +3,11 @@ import { EditorCanvas } from "./editor/Canvas";
 import { flipPiece } from "./editor/pieceFactory";
 import { EditorProvider, useEditor } from "./editor/store";
 import { mqttService } from "./mqtt/client";
+import { dccexService } from "./dccex/client";
 import { Inspector } from "./ui/Inspector";
 import { Palette } from "./ui/Palette";
 import { Settings } from "./ui/Settings";
+import { Throttle } from "./ui/Throttle";
 import { Toolbar } from "./ui/Toolbar";
 import "./App.css";
 
@@ -16,6 +18,9 @@ function EditorApp() {
   useEffect(() => {
     mqttService.onStatus((status, message) => {
       dispatch({ type: "setMqttStatus", status, message });
+    });
+    dccexService.onStatus((status, message) => {
+      dispatch({ type: "setDccexStatus", status, message });
     });
     mqttService.onMessage((topic, payload) => {
       for (const piece of layout.pieces) {
@@ -109,17 +114,21 @@ function EditorApp() {
   }, [dispatch, editorMode, layout.pieces, pasting, placing, replacePiece, replacePieces, selectedIds]);
 
   useEffect(() => {
-    return () => mqttService.disconnect();
+    return () => {
+      mqttService.disconnect();
+      dccexService.disconnect();
+    };
   }, []);
 
   return (
-    <div className="app">
+    <div className={`app ${editorMode === "run" ? "has-throttle" : ""}`}>
       <Toolbar />
       <div className={`workspace ${editorMode}`}>
         {editorMode === "plan" ? <Palette /> : null}
         <EditorCanvas />
         <Inspector />
       </div>
+      {editorMode === "run" ? <Throttle /> : null}
       {settingsOpen ? <Settings /> : null}
     </div>
   );

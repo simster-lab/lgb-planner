@@ -1,5 +1,7 @@
+import { TIE_LENGTH_MM } from "../src/catalog/lgb.ts";
 import { liveSections } from "../src/editor/liveRoutes.ts";
 import { createPlacedPiece, flipPiece, flipPlacing } from "../src/editor/pieceFactory.ts";
+import { hitTestLever, leverKnobWorld, leverLocal, leverOutward, leverScale, leverSideSign } from "../src/editor/render.ts";
 import { attachPortFor, cyclePlacingSnap, ghostAt, freePorts, placingAttachPorts, poseBesideTrack, recomputeConnections } from "../src/editor/snap.ts";
 import { clonePieces, piecesAt, piecesRelativeToCenter, rotatePieces, selectionCenter } from "../src/editor/selection.ts";
 import { worldPorts } from "../src/model/geometry.ts";
@@ -50,23 +52,34 @@ const layout = parseLayout({
       tls: false,
       clientId: "t",
     },
+    dccex: { host: "10.0.0.8", port: 2560 },
   },
   pieces: [
     ...pieces,
     {
       ...point,
       name: "Yard 1",
+      showName: true,
+      leverInside: true,
       mqtt: { topic: "p/1", payloadThrough: "0", payloadDiverge: "1" },
     },
   ],
 });
 const roundtrip = parseLayout(JSON.parse(serializeLayout(layout)));
 const savedPoint = roundtrip.pieces.find((piece) => piece.type === "point");
-if (savedPoint?.name !== "Yard 1" || savedPoint.mqtt?.topic !== "p/1") {
+if (
+  savedPoint?.name !== "Yard 1" ||
+  savedPoint.showName !== true ||
+  savedPoint.leverInside !== true ||
+  savedPoint.mqtt?.topic !== "p/1"
+) {
   throw new Error("MQTT/name roundtrip failed");
 }
 if (roundtrip.settings.mqtt?.host !== "broker.local") {
   throw new Error("broker settings roundtrip failed");
+}
+if (roundtrip.settings.dccex?.host !== "10.0.0.8" || roundtrip.settings.dccex.port !== 2560) {
+  throw new Error("DCC-EX settings roundtrip failed");
 }
 
 const siding = createPlacedPiece({ type: "point", sku: "12100", hand: "left" }, 0, 0, 0);
@@ -195,6 +208,36 @@ if (Math.abs(dropped[0].x - dropped[1].x) < 200) {
 const dropCenter = selectionCenter(dropped);
 if (Math.hypot(dropCenter.x - 1000, dropCenter.y - 500) > 1) {
   throw new Error("paste group should sit on the cursor");
+}
+
+for (const sku of ["12100", "12000", "16140", "16040"] as const) {
+  const turnout = createPlacedPiece({ type: "point", sku, hand: sku === "12000" || sku === "16040" ? "right" : "left" }, 0, 0, 0);
+  for (const zoom of [1, 0.55, 0.12]) {
+    const local = leverLocal(turnout, zoom);
+    if (!local) throw new Error(`lever missing for ${sku}`);
+    const inward = Math.abs(local.y) - 12 * leverScale(zoom);
+    if (inward < TIE_LENGTH_MM / 2 + 8) {
+      throw new Error(`lever overlaps ${sku} sleepers at zoom ${zoom}: inward ${inward.toFixed(1)}`);
+    }
+    if (Math.sign(local.y) !== leverOutward(turnout)) {
+      throw new Error(`lever for ${sku} should sit outside the diverge`);
+    }
+    const inside = leverLocal({ ...turnout, leverInside: true }, zoom);
+    if (!inside || Math.sign(inside.y) !== leverSideSign({ ...turnout, leverInside: true })) {
+      throw new Error(`inside lever for ${sku} should sit on the diverge side`);
+    }
+    if (Math.sign(inside.y) === Math.sign(local.y)) {
+      throw new Error(`inside lever for ${sku} should flip side`);
+    }
+    const knob = leverKnobWorld(turnout, zoom, 0);
+    if (!knob) throw new Error(`lever knob missing for ${sku}`);
+    if (hitTestLever(turnout, knob, zoom)) {
+      throw new Error(`plan lever hit for ${sku} should stay near the pivot at zoom ${zoom}`);
+    }
+    if (!hitTestLever(turnout, knob, zoom, { alongLever: true, anim: 0 })) {
+      throw new Error(`run lever hit for ${sku} should include the knob at zoom ${zoom}`);
+    }
+  }
 }
 
 console.log("geometry and persist checks passed");

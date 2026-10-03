@@ -1,16 +1,28 @@
 import { useState } from "react";
 import { useEditor } from "../editor/store";
 import { mqttService } from "../mqtt/client";
-import { defaultBrokerConfig } from "../model/types";
-import type { BrokerConfig } from "../model/types";
+import { dccexService } from "../dccex/client";
+import { defaultBrokerConfig, defaultDccexConfig } from "../model/types";
+import type { BrokerConfig, DccexConfig } from "../model/types";
 
 export function Settings() {
-  const { layout, mqttStatus, mqttError, dispatch } = useEditor();
+  const { layout, mqttStatus, mqttError, dccexStatus, dccexError, dispatch } = useEditor();
   const current = layout.settings.mqtt ?? defaultBrokerConfig();
+  const dccexCurrent = layout.settings.dccex ?? defaultDccexConfig();
   const [draft, setDraft] = useState<BrokerConfig>(current);
+  const [dccexDraft, setDccexDraft] = useState<DccexConfig>(dccexCurrent);
 
   const set = <K extends keyof BrokerConfig>(key: K, value: BrokerConfig[K]) => {
     setDraft((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const setDccex = <K extends keyof DccexConfig>(key: K, value: DccexConfig[K]) => {
+    setDccexDraft((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const saveAll = () => {
+    dispatch({ type: "setMqttSettings", mqtt: draft });
+    dispatch({ type: "setDccexSettings", dccex: dccexDraft });
   };
 
   return (
@@ -78,7 +90,7 @@ export function Settings() {
             type="button"
             className="primary"
             onClick={() => {
-              dispatch({ type: "setMqttSettings", mqtt: draft });
+              saveAll();
               mqttService.connect(draft);
             }}
           >
@@ -94,7 +106,7 @@ export function Settings() {
           <button
             type="button"
             onClick={() => {
-              dispatch({ type: "setMqttSettings", mqtt: draft });
+              saveAll();
               mqttService.disconnect();
               dispatch({ type: "setSettingsOpen", open: false });
             }}
@@ -103,6 +115,44 @@ export function Settings() {
           </button>
           <button type="button" onClick={() => dispatch({ type: "setSettingsOpen", open: false })}>
             Close
+          </button>
+        </div>
+
+        <h2>DCC-EX command station</h2>
+        <p className="hint">
+          LAN IP and native TCP port (usually <code>2560</code>). This page talks to the planner
+          container; the container opens TCP to the command station. No extra Unraid port.
+        </p>
+        <label className="field">
+          <span>Host</span>
+          <input
+            value={dccexDraft.host}
+            placeholder="192.168.0.50"
+            onChange={(event) => setDccex("host", event.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span>Port</span>
+          <input
+            type="number"
+            value={dccexDraft.port}
+            onChange={(event) => setDccex("port", Number(event.target.value) || 2560)}
+          />
+        </label>
+        <p className={`status ${dccexStatus}`}>
+          Status: {dccexStatus}
+          {dccexError ? ` — ${dccexError}` : ""}
+        </p>
+        <div className="row">
+          <button
+            type="button"
+            className="primary"
+            onClick={() => {
+              saveAll();
+              dccexService.connect(dccexDraft);
+            }}
+          >
+            Save & connect
           </button>
         </div>
       </div>

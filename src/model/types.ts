@@ -50,6 +50,11 @@ export interface BrokerConfig {
   clientId: string;
 }
 
+export interface DccexConfig {
+  host: string;
+  port: number;
+}
+
 export interface PointMqttConfig {
   topic: string;
   payloadThrough: string;
@@ -69,6 +74,8 @@ export interface LayoutPiece {
   y: number;
   rotationDeg: number;
   name?: string;
+  showName?: boolean;
+  leverInside?: boolean;
   pointState?: PointState;
   signalState?: SignalState;
   mqtt?: PointMqttConfig;
@@ -78,6 +85,7 @@ export interface LayoutDocument {
   version: 1;
   settings: {
     mqtt?: BrokerConfig;
+    dccex?: DccexConfig;
   };
   pieces: LayoutPiece[];
 }
@@ -97,6 +105,10 @@ export interface ViewState {
   zoom: number;
 }
 
+export function defaultDccexConfig(): DccexConfig {
+  return { host: "", port: 2560 };
+}
+
 export function defaultBrokerConfig(): BrokerConfig {
   const runtime = runtimeBrokerDefaults();
   return {
@@ -113,7 +125,7 @@ export function defaultBrokerConfig(): BrokerConfig {
 export function emptyLayout(): LayoutDocument {
   return {
     version: 1,
-    settings: { mqtt: defaultBrokerConfig() },
+    settings: { mqtt: defaultBrokerConfig(), dccex: defaultDccexConfig() },
     pieces: [],
   };
 }

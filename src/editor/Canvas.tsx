@@ -10,9 +10,9 @@ import {
   drawScene,
   hitTestLever,
   hitTestPiece,
+  hitTestSignal,
   pieceBounds,
   screenToWorld,
-  signalHeadWorld,
   type Bounds,
 } from "./render";
 import { piecesAt } from "./selection";
@@ -23,6 +23,14 @@ import type { LayoutPiece } from "../model/types";
 const MIN_ZOOM = 0.08;
 const MAX_ZOOM = 3.2;
 const MARQUEE_PX = 8;
+
+function safeLiveSections(pieces: LayoutPiece[]) {
+  try {
+    return liveSections(pieces);
+  } catch {
+    return undefined;
+  }
+}
 
 type Drag =
   | { mode: "pan"; lastX: number; lastY: number }
@@ -111,7 +119,8 @@ export function EditorCanvas() {
           anim: animRef.current,
           hoverLeverId,
           editorMode,
-          liveSections: plan ? undefined : liveSections(layout.pieces),
+          zoom: view.zoom,
+          liveSections: plan ? undefined : safeLiveSections(layout.pieces),
           attachPortId: plan && placing ? attachPortId(placing) : undefined,
           marquee:
             drag?.mode === "marquee"
@@ -171,7 +180,7 @@ export function EditorCanvas() {
   const pieceAt = (world: { x: number; y: number }) => {
     for (let i = layout.pieces.length - 1; i >= 0; i -= 1) {
       const piece = layout.pieces[i];
-      if (hitTestPiece(piece, world)) return piece;
+      if (hitTestPiece(piece, world, 28, view.zoom)) return piece;
     }
     return undefined;
   };
@@ -179,11 +188,16 @@ export function EditorCanvas() {
   const leverAt = (world: { x: number; y: number }) => {
     for (let i = layout.pieces.length - 1; i >= 0; i -= 1) {
       const piece = layout.pieces[i];
-      if (piece.type === "point" && hitTestLever(piece, world)) return piece;
-      if (piece.type === "signal") {
-        const head = signalHeadWorld(piece);
-        if (Math.hypot(world.x - head.x, world.y - head.y) <= 32) return piece;
+      if (
+        piece.type === "point" &&
+        hitTestLever(piece, world, view.zoom, {
+          alongLever: !plan,
+          anim: piece.pointState === "diverge" ? 1 : 0,
+        })
+      ) {
+        return piece;
       }
+      if (piece.type === "signal" && hitTestSignal(piece, world, view.zoom)) return piece;
     }
     return undefined;
   };
@@ -399,7 +413,7 @@ export function EditorCanvas() {
     const crossing = drag.currentClientX < drag.startClientX;
     const hit = layout.pieces
       .filter((piece) => {
-        const bounds = pieceBounds(piece);
+        const bounds = pieceBounds(piece, view.zoom);
         return crossing ? boundsIntersect(box, bounds) : boundsContain(box, bounds);
       })
       .map((piece) => piece.id);

@@ -5,6 +5,7 @@ import {
   TIE_WIDTH_MM,
   curveSpec,
   localArcPoint,
+  pieceLabel,
   pointSpec,
   signalSpec,
 } from "../catalog/lgb";
@@ -26,6 +27,7 @@ export interface DrawExtras {
   anim: Map<string, number>;
   hoverLeverId?: string | null;
   editorMode: EditorMode;
+  zoom: number;
   liveSections?: { colour: string; paths: Vec2[][] }[];
   attachPortId?: PortId;
   marquee?: { x0: number; y0: number; x1: number; y1: number; crossing: boolean };
@@ -97,11 +99,14 @@ export function worldPath(piece: LayoutPiece, local: Vec2[]): Vec2[] {
   return local.map((p) => localToWorld(piece, p));
 }
 
-export function pieceBounds(piece: LayoutPiece): Bounds {
+export function pieceBounds(piece: LayoutPiece, zoom = 1): Bounds {
   const pts: Vec2[] = [];
   if (piece.type === "signal") {
+    const scale = signalScale(zoom);
     pts.push(localToWorld(piece, { x: 0, y: 0 }));
-    pts.push(localToWorld(piece, { x: 0, y: -58 }));
+    pts.push(localToWorld(piece, { x: 0, y: -80 * scale }));
+    pts.push(localToWorld(piece, { x: 50 * scale, y: -56 * scale }));
+    pts.push(localToWorld(piece, { x: -16 * scale, y: -56 * scale }));
   } else {
     for (const path of piecePaths(piece)) pts.push(...worldPath(piece, path));
   }
@@ -189,26 +194,89 @@ function fillTies(ctx: CanvasRenderingContext2D, pts: Vec2[], alpha = 1): void {
   ctx.restore();
 }
 
-export function leverLocal(piece: LayoutPiece): Vec2 | undefined {
-  const spec = pointSpec(piece.sku);
-  if (!spec) return undefined;
-  const hand = piece.hand ?? spec.hand;
-  const side = hand === "left" ? 1 : -1;
-  return { x: 48, y: side * (RAIL_OFFSET + 36) };
+const LEVER_NOMINAL_MM = 80;
+const LEVER_MIN_SCREEN_PX = 44;
+const LABEL_NOMINAL_MM = 36;
+const LABEL_MIN_SCREEN_PX = 16;
+
+export function overlayScale(zoom: number, nominalMm: number, minScreenPx: number): number {
+  return Math.max(1, minScreenPx / (nominalMm * Math.max(zoom, 0.01)));
 }
 
-export function leverWorld(piece: LayoutPiece): Vec2 | undefined {
-  const local = leverLocal(piece);
+const LEVER_BASE_MM = 24;
+const LEVER_GAP_MM = 20;
+
+export function leverScale(zoom: number): number {
+  return overlayScale(zoom, LEVER_NOMINAL_MM, LEVER_MIN_SCREEN_PX);
+}
+
+export function signalScale(zoom: number): number {
+  return leverScale(zoom);
+}
+
+/** +Y is away from the diverge (outside / straight side). */
+export function leverOutward(piece: LayoutPiece): number {
+  const spec = pointSpec(piece.sku);
+  const hand = piece.hand ?? spec?.hand ?? "left";
+  return hand === "left" ? 1 : -1;
+}
+
+export function leverSideSign(piece: LayoutPiece): number {
+  const outside = leverOutward(piece);
+  return piece.leverInside ? -outside : outside;
+}
+
+export function leverLocal(piece: LayoutPiece, zoom = 1): Vec2 | undefined {
+  const spec = pointSpec(piece.sku);
+  if (!spec) return undefined;
+  const scale = leverScale(zoom);
+  const fromCenter = TIE_LENGTH_MM / 2 + (LEVER_BASE_MM * 0.5 + LEVER_GAP_MM) * scale;
+  return { x: 72, y: leverSideSign(piece) * fromCenter };
+}
+
+export function leverWorld(piece: LayoutPiece, zoom = 1): Vec2 | undefined {
+  const local = leverLocal(piece, zoom);
   if (!local) return undefined;
   return localToWorld(piece, local);
 }
 
-export function signalHeadLocal(): Vec2 {
-  return { x: 0, y: -58 };
+const LEVER_KNOB_MM = 74;
+
+export function signalHeadLocal(zoom = 1): Vec2 {
+  return { x: 0, y: -58 * signalScale(zoom) };
 }
 
-export function signalHeadWorld(piece: LayoutPiece): Vec2 {
-  return localToWorld(piece, signalHeadLocal());
+export function signalHeadWorld(piece: LayoutPiece, zoom = 1): Vec2 {
+  return localToWorld(piece, signalHeadLocal(zoom));
+}
+
+export function leverThrowAngle(anim: number): number {
+  return 28 - 56 * anim;
+}
+
+export function leverKnobLocal(piece: LayoutPiece, zoom = 1, anim = 0): Vec2 | undefined {
+  const pivot = leverLocal(piece, zoom);
+  if (!pivot) return undefined;
+  const scale = leverScale(zoom);
+  const theta = degToRad(leverThrowAngle(anim));
+  return {
+    x: pivot.x - LEVER_KNOB_MM * Math.sin(theta) * scale,
+    y: pivot.y + LEVER_KNOB_MM * Math.cos(theta) * scale * leverSideSign(piece),
+  };
+}
+
+export function leverKnobWorld(piece: LayoutPiece, zoom = 1, anim = 0): Vec2 | undefined {
+  const local = leverKnobLocal(piece, zoom, anim);
+  if (!local) return undefined;
+  return localToWorld(piece, local);
+}
+
+function distToSegment(point: Vec2, a: Vec2, b: Vec2): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy || 1;
+  const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / len2));
+  return Math.hypot(point.x - (a.x + dx * t), point.y - (a.y + dy * t));
 }
 
 function drawSignal(
@@ -217,12 +285,15 @@ function drawSignal(
   anim: number,
   hover: boolean,
   alpha: number,
+  zoom: number,
 ): void {
   const spec = signalSpec(piece.sku);
   const origin = localToWorld(piece, { x: 0, y: 0 });
+  const scale = signalScale(zoom);
   ctx.save();
   ctx.translate(origin.x, origin.y);
   ctx.rotate(degToRad(piece.rotationDeg));
+  ctx.scale(scale, scale);
   ctx.globalAlpha = alpha;
   ctx.strokeStyle = hover ? "#e8c36a" : "#3a2a12";
   ctx.lineWidth = 2.2;
@@ -281,30 +352,57 @@ function drawLever(
   piece: LayoutPiece,
   anim: number,
   hover: boolean,
+  zoom: number,
 ): void {
-  const local = leverLocal(piece);
+  const local = leverLocal(piece, zoom);
   if (!local) return;
   const world = localToWorld(piece, local);
-  const throwAngle = (piece.hand === "left" ? -1 : 1) * (28 - 56 * anim);
+  const scale = leverScale(zoom);
+  const throwAngle = 28 - 56 * anim;
   ctx.save();
   ctx.translate(world.x, world.y);
-  ctx.rotate(degToRad(piece.rotationDeg + throwAngle));
+  ctx.rotate(degToRad(piece.rotationDeg));
+  ctx.scale(scale, scale * leverSideSign(piece));
+  ctx.rotate(degToRad(throwAngle));
   ctx.fillStyle = hover ? "#e8c36a" : "#c4a35a";
   ctx.strokeStyle = "#3a2a12";
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 2.4;
   ctx.beginPath();
-  ctx.roundRect(-7, -7, 14, 14, 3);
+  ctx.roundRect(-12, -12, 24, 24, 5);
   ctx.fill();
   ctx.stroke();
   ctx.fillStyle = "#8b1e1e";
   ctx.beginPath();
-  ctx.roundRect(-4, -40, 8, 36, 3);
+  ctx.roundRect(-7, 8, 14, 60, 4);
   ctx.fill();
   ctx.fillStyle = "#d4b06a";
   ctx.beginPath();
-  ctx.arc(0, -44, 8, 0, Math.PI * 2);
+  ctx.arc(0, 74, 13, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
+  ctx.restore();
+}
+
+function drawPointName(ctx: CanvasRenderingContext2D, piece: LayoutPiece, zoom: number, alpha: number): void {
+  const lever = leverWorld(piece, zoom);
+  if (!lever) return;
+  const side = leverSideSign(piece);
+  const scale = overlayScale(zoom, LABEL_NOMINAL_MM, LABEL_MIN_SCREEN_PX);
+  const fontMm = LABEL_NOMINAL_MM * scale;
+  const label = pieceLabel(piece);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = `600 ${fontMm}px ui-sans-serif, system-ui`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const x = lever.x;
+  const y = lever.y + side * (88 * leverScale(zoom) + fontMm * 0.85);
+  ctx.lineWidth = Math.max(3, 4 * scale);
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.72)";
+  ctx.lineJoin = "round";
+  ctx.strokeText(label, x, y);
+  ctx.fillStyle = "#efe6d2";
+  ctx.fillText(label, x, y);
   ctx.restore();
 }
 
@@ -406,12 +504,12 @@ function drawPiece(
 
   if (piece.type === "point" && paths[0] && paths[1]) {
     drawPointExtras(ctx, piece, paths[0], paths[1], pointAnim, alpha, extras.editorMode !== "run");
-    if (!ghost) drawLever(ctx, piece, pointAnim, extras.hoverLeverId === piece.id);
+    if (!ghost) drawLever(ctx, piece, pointAnim, extras.hoverLeverId === piece.id, extras.zoom);
   }
 
   if (piece.type === "signal") {
     const anim = extras.anim.get(piece.id) ?? (piece.signalState === "clear" ? 1 : 0);
-    drawSignal(ctx, piece, anim, extras.hoverLeverId === piece.id, alpha);
+    drawSignal(ctx, piece, anim, extras.hoverLeverId === piece.id, alpha, extras.zoom);
   }
 }
 
@@ -486,6 +584,10 @@ export function drawScene(
     }
   }
 
+  for (const piece of track) {
+    if (piece.type === "point" && piece.showName) drawPointName(ctx, piece, extras.zoom, 1);
+  }
+
   if (extras.editorMode === "plan") {
     ctx.save();
     for (const port of extras.freePorts) {
@@ -542,8 +644,8 @@ export function drawScene(
   ctx.stroke();
 }
 
-export function hitTestPiece(piece: LayoutPiece, world: Vec2, threshold = 28): boolean {
-  if (piece.type === "signal") return hitTestSignal(piece, world);
+export function hitTestPiece(piece: LayoutPiece, world: Vec2, threshold = 28, zoom = 1): boolean {
+  if (piece.type === "signal") return hitTestSignal(piece, world, zoom);
   for (const local of piecePaths(piece)) {
     const path = worldPath(piece, local);
     for (let i = 1; i < path.length; i += 1) {
@@ -561,17 +663,33 @@ export function hitTestPiece(piece: LayoutPiece, world: Vec2, threshold = 28): b
   return false;
 }
 
-export function hitTestLever(piece: LayoutPiece, world: Vec2, radius = 28): boolean {
-  const lever = leverWorld(piece);
+export function hitTestLever(
+  piece: LayoutPiece,
+  world: Vec2,
+  zoom = 1,
+  options?: { radius?: number; alongLever?: boolean; anim?: number },
+): boolean {
+  const lever = leverWorld(piece, zoom);
   if (!lever) return false;
-  return Math.hypot(world.x - lever.x, world.y - lever.y) <= radius;
+  const scale = leverScale(zoom);
+  const radius = (options?.radius ?? 36) * scale;
+  if (Math.hypot(world.x - lever.x, world.y - lever.y) <= radius) return true;
+  if (!options?.alongLever) return false;
+  const knob = leverKnobWorld(piece, zoom, options.anim ?? 0);
+  if (!knob) return false;
+  const shaftRadius = Math.max(radius, 32 * scale);
+  return (
+    Math.hypot(world.x - knob.x, world.y - knob.y) <= shaftRadius ||
+    distToSegment(world, lever, knob) <= shaftRadius
+  );
 }
 
-export function hitTestSignal(piece: LayoutPiece, world: Vec2, radius = 32): boolean {
-  const head = signalHeadWorld(piece);
+export function hitTestSignal(piece: LayoutPiece, world: Vec2, zoom = 1, radius = 32): boolean {
+  const scale = signalScale(zoom);
+  const head = signalHeadWorld(piece, zoom);
   const base = localToWorld(piece, { x: 0, y: 0 });
   return (
-    Math.hypot(world.x - head.x, world.y - head.y) <= radius ||
-    Math.hypot(world.x - base.x, world.y - base.y) <= 18
+    Math.hypot(world.x - head.x, world.y - head.y) <= radius * scale ||
+    Math.hypot(world.x - base.x, world.y - base.y) <= 18 * scale
   );
 }

@@ -7,6 +7,10 @@
   color: #efe6d2;
 }
 
+.app.has-throttle {
+  grid-template-rows: auto 1fr auto;
+}
+
 .loading-layout {
   place-items: center;
   display: grid;
@@ -220,6 +224,7 @@ input[type="password"] {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  background: #2c3328;
 }
 
 canvas {
@@ -281,10 +286,75 @@ canvas.lever {
 
 .modal {
   width: min(480px, calc(100vw - 24px));
+  max-height: min(90vh, 760px);
+  overflow: auto;
   background: #242b20;
   border: 1px solid #c4a35a;
   border-radius: 12px;
   padding: 18px;
+}
+
+.throttle {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+  padding: 8px 14px 10px;
+  background: #242b20;
+  border-top: 1px solid #3d4a32;
+  min-height: 0;
+}
+
+.throttle-speed-wrap {
+  flex: 0 0 auto;
+}
+
+.throttle-speed-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #cfc3a4;
+}
+
+.throttle-speed {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  height: 132px;
+  width: 28px;
+  accent-color: #c4a35a;
+}
+
+.throttle-speed-value {
+  font-variant-numeric: tabular-nums;
+  color: #e7d7a7;
+}
+
+.throttle-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.throttle-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.throttle-cab {
+  max-width: 128px;
+  margin-bottom: 0;
+}
+
+.throttle-fns button {
+  min-width: 40px;
+  padding: 6px 8px;
+  font-size: 12px;
 }
 
 .status {

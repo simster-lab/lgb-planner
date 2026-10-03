@@ -2,6 +2,7 @@ import { pieceLabel } from "../catalog/lgb";
 import { flipPiece } from "../editor/pieceFactory";
 import { useEditor } from "../editor/store";
 import { mqttService } from "../mqtt/client";
+import { DraftNumberInput } from "./DraftNumberInput";
 
 export function Inspector() {
   const {
@@ -55,20 +56,67 @@ export function Inspector() {
         />
       </label>
 
+      {plan && selected.type === "point" && (
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={
+              layout.pieces
+                .filter((piece) => selectedIds.includes(piece.id) && piece.type === "point")
+                .every((piece) => piece.showName)
+            }
+            onChange={(event) => {
+              const showName = event.target.checked;
+              const points = layout.pieces.filter(
+                (piece) => selectedIds.includes(piece.id) && piece.type === "point",
+              );
+              if (points.length > 1) {
+                replacePieces(points.map((piece) => ({ ...piece, showName })));
+              } else {
+                updatePiece(selected.id, { showName });
+              }
+            }}
+          />
+          Show name on map
+        </label>
+      )}
+
+      {plan && selected.type === "point" && (
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={
+              layout.pieces
+                .filter((piece) => selectedIds.includes(piece.id) && piece.type === "point")
+                .every((piece) => piece.leverInside)
+            }
+            onChange={(event) => {
+              const leverInside = event.target.checked;
+              const points = layout.pieces.filter(
+                (piece) => selectedIds.includes(piece.id) && piece.type === "point",
+              );
+              if (points.length > 1) {
+                replacePieces(points.map((piece) => ({ ...piece, leverInside })));
+              } else {
+                updatePiece(selected.id, { leverInside });
+              }
+            }}
+          />
+          Lever inside
+        </label>
+      )}
+
       {plan && selected.type === "straight" && (
         <label className="field">
           <span>Length (mm)</span>
-          <input
-            type="number"
+          <DraftNumberInput
+            value={selected.lengthMm ?? 300}
             min={10}
             max={8000}
-            value={selected.lengthMm ?? 300}
-            onChange={(event) =>
-              previewPiece({
-                ...selected,
-                lengthMm: Math.max(1, Number(event.target.value) || 300),
-              })
-            }
+            onValue={(next) => {
+              if (next == null) return;
+              previewPiece({ ...selected, lengthMm: next });
+            }}
           />
         </label>
       )}

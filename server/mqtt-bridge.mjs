@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { createConnection } from "node:net";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { extname, join, normalize, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -184,6 +185,112 @@ function connectUpstream(next) {
     }
   });
   broadcastStatus();
+}
+
+/** @type {{ host: string, port: number }} */
+let dccexConfig = { host: "", port: 2560 };
+/** @type {import("node:net").Socket | null} */
+let dccexSocket = null;
+let dccexBuf = "";
+/** @type {Set<import("ws").WebSocket>} */
+const dccexClients = new Set();
+
+function dccexConnected() {
+  return Boolean(dccexSocket && !dccexSocket.destroyed && dccexSocket.writable);
+}
+
+function broadcastDccex(body) {
+  for (const socket of dccexClients) sendJsonWs(socket, body);
+}
+
+function frameDccexCommand(command) {
+  const raw = String(command ?? "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("<") && raw.endsWith(">")) return raw;
+  return `<${raw.replace(/^<|>$/g, "")}>`;
+}
+
+function writeDccex(command) {
+  const framed = frameDccexCommand(command);
+  if (!framed || !dccexConnected() || !dccexSocket) return false;
+  dccexSocket.write(`${framed}\n`);
+  return true;
+}
+
+function drainDccexBuffer() {
+  while (true) {
+    const start = dccexBuf.indexOf("<");
+    if (start < 0) {
+      dccexBuf = "";
+      return;
+    }
+    if (start > 0) dccexBuf = dccexBuf.slice(start);
+    const end = dccexBuf.indexOf(">");
+    if (end < 0) return;
+    const frame = dccexBuf.slice(0, end + 1);
+    dccexBuf = dccexBuf.slice(end + 1);
+    broadcastDccex({ type: "reply", reply: frame });
+    if (frame === "<p1>" || frame.startsWith("<p1 ")) {
+      broadcastDccex({ type: "power", on: true });
+    } else if (frame === "<p0>" || frame.startsWith("<p0 ")) {
+      broadcastDccex({ type: "power", on: false });
+    }
+  }
+}
+
+function dccexStatusBody(error) {
+  return {
+    type: "status",
+    connected: dccexConnected(),
+    host: dccexConfig.host,
+    port: dccexConfig.port,
+    ...(error ? { error } : {}),
+  };
+}
+
+function disconnectDccex() {
+  const sock = dccexSocket;
+  dccexSocket = null;
+  dccexBuf = "";
+  if (sock) {
+    sock.removeAllListeners();
+    sock.destroy();
+  }
+  broadcastDccex(dccexStatusBody());
+}
+
+function connectDccex(next) {
+  disconnectDccex();
+  dccexConfig = {
+    host: String(next.host || "").trim(),
+    port: Number(next.port) || 2560,
+  };
+  if (!dccexConfig.host) {
+    broadcastDccex({ ...dccexStatusBody("No DCC-EX host"), connected: false });
+    return;
+  }
+  const sock = createConnection({ host: dccexConfig.host, port: dccexConfig.port });
+  dccexSocket = sock;
+  sock.setEncoding("utf8");
+  sock.on("connect", () => {
+    console.log(`DCC-EX TCP connected ${dccexConfig.host}:${dccexConfig.port}`);
+    broadcastDccex(dccexStatusBody());
+    sock.write("<s>\n");
+  });
+  sock.on("data", (chunk) => {
+    dccexBuf += chunk;
+    drainDccexBuffer();
+  });
+  sock.on("close", () => {
+    if (dccexSocket === sock) dccexSocket = null;
+    dccexBuf = "";
+    console.log("DCC-EX TCP closed");
+    broadcastDccex(dccexStatusBody());
+  });
+  sock.on("error", (error) => {
+    console.error("DCC-EX TCP error", error.message);
+    broadcastDccex(dccexStatusBody(error.message));
+  });
 }
 
 function sendJson(res, status, body) {
@@ -381,6 +488,32 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
+  if (path === "/api/dccex" && req.method === "GET") {
+    sendJson(res, 200, {
+      host: dccexConfig.host,
+      port: dccexConfig.port,
+      connected: dccexConnected(),
+    });
+    return;
+  }
+
+  if (path === "/api/dccex" && req.method === "POST") {
+    try {
+      const raw = await readBody(req);
+      const data = JSON.parse(raw || "{}");
+      if (data.disconnect) {
+        disconnectDccex();
+        sendJson(res, 200, { ok: true, connected: false });
+        return;
+      }
+      connectDccex(data);
+      sendJson(res, 200, { ok: true, host: dccexConfig.host, port: dccexConfig.port });
+    } catch (error) {
+      sendJson(res, 400, { ok: false, error: error instanceof Error ? error.message : "bad request" });
+    }
+    return;
+  }
+
   if (req.method !== "GET" && req.method !== "HEAD") {
     res.writeHead(405);
     res.end();
@@ -428,19 +561,54 @@ wss.on("connection", (socket) => {
   });
 });
 
+const dccexWss = new WebSocketServer({ noServer: true });
+
+dccexWss.on("connection", (socket) => {
+  dccexClients.add(socket);
+  sendJsonWs(socket, dccexStatusBody());
+  socket.on("message", (raw) => {
+    let msg;
+    try {
+      msg = JSON.parse(raw.toString());
+    } catch {
+      return;
+    }
+    if (msg?.type === "command" && typeof msg.command === "string") {
+      if (!writeDccex(msg.command)) {
+        sendJsonWs(socket, { type: "status", connected: false, error: "DCC-EX not connected", host: dccexConfig.host, port: dccexConfig.port });
+      }
+    }
+  });
+  socket.on("close", () => {
+    dccexClients.delete(socket);
+  });
+  socket.on("error", (error) => {
+    console.error("DCC-EX WS error", error.message);
+  });
+});
+
 httpServer.on("upgrade", (req, socket, head) => {
   const path = (req.url || "/").split("?")[0];
-  if (path !== "/mqtt") {
-    socket.destroy();
+  if (path === "/mqtt") {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
+    });
     return;
   }
-  wss.handleUpgrade(req, socket, head, (ws) => {
-    wss.emit("connection", ws, req);
-  });
+  if (path === "/dccex") {
+    dccexWss.handleUpgrade(req, socket, head, (ws) => {
+      dccexWss.emit("connection", ws, req);
+    });
+    return;
+  }
+  socket.destroy();
 });
 
 setInterval(() => {
   for (const socket of sockets) {
+    if (socket.readyState === 1) socket.ping();
+  }
+  for (const socket of dccexClients) {
     if (socket.readyState === 1) socket.ping();
   }
 }, 25_000);

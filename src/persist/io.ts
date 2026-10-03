@@ -3,6 +3,7 @@ import { resetPointSerial } from "../editor/pieceFactory";
 import type {
   BrokerConfig,
   CatalogSku,
+  DccexConfig,
   Hand,
   LayoutDocument,
   LayoutPiece,
@@ -11,7 +12,7 @@ import type {
   PointState,
   SignalState,
 } from "../model/types";
-import { defaultBrokerConfig, emptyLayout, newPieceId } from "../model/types";
+import { defaultBrokerConfig, defaultDccexConfig, emptyLayout, newPieceId } from "../model/types";
 
 const STORAGE_KEY = "lgb-planner-layout";
 
@@ -36,6 +37,15 @@ function parseMqtt(value: unknown): PointMqttConfig | undefined {
     payloadDanger: asString(value.payloadDanger, "danger"),
     payloadClear: asString(value.payloadClear, "clear"),
     statusTopic: asString(value.statusTopic),
+  };
+}
+
+function parseDccex(value: unknown): DccexConfig {
+  const defaults = defaultDccexConfig();
+  if (!isRecord(value)) return defaults;
+  return {
+    host: asString(value.host, defaults.host),
+    port: asNumber(value.port, defaults.port) || defaults.port,
   };
 }
 
@@ -104,6 +114,8 @@ function parsePiece(value: unknown): LayoutPiece | undefined {
     y: asNumber(value.y, 0),
     rotationDeg: asNumber(value.rotationDeg, 0),
     name: typeof value.name === "string" ? value.name : undefined,
+    showName: value.showName === true ? true : undefined,
+    leverInside: value.leverInside === true ? true : undefined,
     pointState,
     signalState,
     mqtt: pieceType === "point" || pieceType === "signal"
@@ -122,7 +134,7 @@ export function parseLayout(raw: unknown): LayoutDocument {
   resetPointSerial(pieces);
   return {
     version: 1,
-    settings: { mqtt: parseBroker(settings.mqtt) },
+    settings: { mqtt: parseBroker(settings.mqtt), dccex: parseDccex(settings.dccex) },
     pieces,
   };
 }

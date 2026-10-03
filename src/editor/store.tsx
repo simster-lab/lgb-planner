@@ -10,6 +10,7 @@ import {
 } from "react";
 import type {
   BrokerConfig,
+  DccexConfig,
   EditorMode,
   LayoutDocument,
   LayoutPiece,
@@ -19,7 +20,7 @@ import type {
   SignalState,
   ViewState,
 } from "../model/types";
-import { defaultBrokerConfig, emptyLayout } from "../model/types";
+import { defaultBrokerConfig, defaultDccexConfig, emptyLayout } from "../model/types";
 import { loadAutosave, writeAutosave } from "../persist/io";
 import { fetchCurrentCircuit, saveCurrentCircuit } from "../persist/remote";
 import { loadRuntimeConfig } from "../config";
@@ -35,6 +36,8 @@ export interface EditorState {
   view: ViewState;
   mqttStatus: MqttConnectionStatus;
   mqttError?: string;
+  dccexStatus: MqttConnectionStatus;
+  dccexError?: string;
   settingsOpen: boolean;
   circuitName: string | null;
   editorMode: EditorMode;
@@ -60,7 +63,9 @@ type EditorAction =
   | { type: "setPlacing"; placing: Placing | null }
   | { type: "setView"; view: Partial<ViewState> }
   | { type: "setMqttSettings"; mqtt: BrokerConfig }
+  | { type: "setDccexSettings"; dccex: DccexConfig }
   | { type: "setMqttStatus"; status: MqttConnectionStatus; message?: string }
+  | { type: "setDccexStatus"; status: MqttConnectionStatus; message?: string }
   | { type: "setSettingsOpen"; open: boolean }
   | { type: "setCircuitName"; name: string | null }
   | { type: "setEditorMode"; mode: EditorMode }
@@ -104,6 +109,7 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
     case "newLayout": {
       const layout = emptyLayout();
       layout.settings.mqtt = state.layout.settings.mqtt ?? defaultBrokerConfig();
+      layout.settings.dccex = state.layout.settings.dccex ?? defaultDccexConfig();
       resetPointSerial([]);
       return {
         ...withHistory(state, layout),
@@ -208,8 +214,18 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
           settings: { ...state.layout.settings, mqtt: action.mqtt },
         },
       };
+    case "setDccexSettings":
+      return {
+        ...state,
+        layout: {
+          ...state.layout,
+          settings: { ...state.layout.settings, dccex: action.dccex },
+        },
+      };
     case "setMqttStatus":
       return { ...state, mqttStatus: action.status, mqttError: action.message };
+    case "setDccexStatus":
+      return { ...state, dccexStatus: action.status, dccexError: action.message };
     case "setSettingsOpen":
       return { ...state, settingsOpen: action.open };
     case "setCircuitName":
@@ -306,6 +322,7 @@ const initialState: EditorState = {
   placing: null,
   view: defaultView,
   mqttStatus: "disconnected",
+  dccexStatus: "disconnected",
   settingsOpen: false,
   circuitName: null,
   editorMode: "plan",
