@@ -1,11 +1,11 @@
 import { TIE_LENGTH_MM } from "../src/catalog/lgb.ts";
 import { liveSections } from "../src/editor/liveRoutes.ts";
 import { createPlacedPiece, flipPiece, flipPlacing } from "../src/editor/pieceFactory.ts";
-import { hitTestLever, leverKnobWorld, leverLocal, leverOutward, leverScale, leverSideSign } from "../src/editor/render.ts";
+import { hitTestLever, leverKnobWorld, leverLocal, leverOutward, leverScale, leverSideSign, rfidNameSide } from "../src/editor/render.ts";
 import { attachPortFor, cyclePlacingSnap, ghostAt, freePorts, placingAttachPorts, poseBesideTrack, recomputeConnections } from "../src/editor/snap.ts";
 import { clonePieces, piecesAt, piecesRelativeToCenter, rotatePieces, selectionCenter } from "../src/editor/selection.ts";
 import { worldPorts } from "../src/model/geometry.ts";
-import { parseLayout, serializeLayout, circuitNameFromFilename, sanitizeCircuitName } from "../src/persist/io.ts";
+import { parseLayout, parseRoster, serializeLayout, circuitNameFromFilename, sanitizeCircuitName } from "../src/persist/io.ts";
 import type { LayoutPiece, Placing } from "../src/model/types.ts";
 
 const placing: Placing = { type: "curve", sku: "15000", hand: "left" };
@@ -238,6 +238,83 @@ for (const sku of ["12100", "12000", "16140", "16040"] as const) {
       throw new Error(`run lever hit for ${sku} should include the knob at zoom ${zoom}`);
     }
   }
+}
+
+const rfidHost = createPlacedPiece({ type: "straight", lengthMm: 300 }, 0, 0, 0);
+const rfidGhost = ghostAt({ type: "rfid" }, [rfidHost], 150, 0);
+if (rfidGhost.type !== "rfid" || rfidGhost.hostPieceId !== rfidHost.id) {
+  throw new Error("RFID should snap onto the nearest track piece");
+}
+if (Math.abs((rfidGhost.alongMm ?? 0) - 150) > 8) {
+  throw new Error(`RFID alongMm should be near 150, got ${rfidGhost.alongMm}`);
+}
+const rfid = createPlacedPiece({ type: "rfid" }, rfidGhost.x, rfidGhost.y, rfidGhost.rotationDeg);
+const placedRfid = {
+  ...rfid,
+  hostPieceId: rfidGhost.hostPieceId,
+  alongMm: rfidGhost.alongMm,
+  hostPath: rfidGhost.hostPath,
+  fadeMs: 4000,
+  showName: true,
+  mqtt: { topic: "", payloadThrough: "", payloadDiverge: "", statusTopic: "garden/rfid/1" },
+};
+const withRfid = parseLayout({
+  version: 1,
+  settings: {},
+  pieces: [rfidHost, placedRfid],
+});
+const savedRfid = parseLayout(JSON.parse(serializeLayout(withRfid))).pieces.find((piece) => piece.type === "rfid");
+if (
+  savedRfid?.hostPieceId !== rfidHost.id ||
+  savedRfid.mqtt?.statusTopic !== "garden/rfid/1" ||
+  savedRfid.fadeMs !== 4000 ||
+  savedRfid.showName !== true
+) {
+  throw new Error("RFID persist roundtrip failed");
+}
+if (rfidNameSide(placedRfid, [rfidHost, placedRfid]) !== "above") {
+  throw new Error("RFID name on east-west track should default above");
+}
+if (rfidNameSide({ ...placedRfid, nameOpposite: true }, [rfidHost, placedRfid]) !== "below") {
+  throw new Error("RFID name toggle on east-west track should move below");
+}
+const uprightHost = createPlacedPiece({ type: "straight", lengthMm: 300 }, 0, 0, 90);
+const uprightRfid = {
+  ...createPlacedPiece({ type: "rfid" }, 0, 150, 90),
+  hostPieceId: uprightHost.id,
+  alongMm: 150,
+  hostPath: 0,
+};
+if (rfidNameSide(uprightRfid, [uprightHost, uprightRfid]) !== "right") {
+  throw new Error("RFID name on north-south track should default to the right");
+}
+if (rfidNameSide({ ...uprightRfid, nameOpposite: true }, [uprightHost, uprightRfid]) !== "left") {
+  throw new Error("RFID name toggle on north-south track should move left");
+}
+const flippedRfid = parseLayout({
+  version: 1,
+  settings: {},
+  pieces: [{ ...placedRfid, nameOpposite: true }],
+}).pieces[0];
+if (flippedRfid?.nameOpposite !== true) {
+  throw new Error("RFID name side should persist");
+}
+const copied = clonePieces([rfidHost, placedRfid]);
+const copiedHost = copied.find((piece) => piece.type === "straight");
+const copiedRfid = copied.find((piece) => piece.type === "rfid");
+if (!copiedHost || !copiedRfid || copiedRfid.hostPieceId !== copiedHost.id) {
+  throw new Error("paste should remap RFID hostPieceId when the host is copied");
+}
+const orphan = clonePieces([placedRfid])[0];
+if (orphan.hostPieceId) {
+  throw new Error("pasting an RFID without its host should drop the old host id");
+}
+
+const roster = parseRoster({
+  locos: [{ id: "loco-1", address: 3, name: "Stainz", tag: "E200" }, { address: 0, name: "Bad" }],
+});
+if (roster.length !== 2 || roster[0].address !== 3 || roster[1].address !== null) {
+  throw new Error("roster parse should keep names and clamp invalid addresses");
 }
 
 console.log("geometry and persist checks passed");

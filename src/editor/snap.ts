@@ -16,6 +16,7 @@ import {
   rotateLocal,
 } from "../model/geometry";
 import type { LayoutPiece, LocalPort, Placing, PortId, WorldPort } from "../model/types";
+import { isTrackPiece } from "../model/types";
 import { createPlacedPiece } from "./pieceFactory";
 import { piecePaths, worldPath } from "./render";
 
@@ -89,7 +90,7 @@ export function nearestFreePort(
 }
 
 export function placingAttachPorts(placing: Placing): LocalPort[] {
-  if (placing.type === "signal") return [];
+  if (placing.type === "signal" || placing.type === "rfid") return [];
   const draft = createPlacedPiece(placing, 0, 0, 0, { preview: true });
   return localPorts(draft);
 }
@@ -128,34 +129,55 @@ function startPortFor(placing: Placing): LocalPort {
   return start;
 }
 
+export interface TrackHit {
+  x: number;
+  y: number;
+  heading: number;
+  dist: number;
+  pieceId: string;
+  alongMm: number;
+  pathIndex: number;
+}
+
 export function nearestTrackPoint(
   pieces: LayoutPiece[],
   worldX: number,
   worldY: number,
   maxDist = SIGNAL_SNAP_MM,
   ignorePieceId?: string,
-): { x: number; y: number; heading: number; dist: number } | undefined {
-  let best: { x: number; y: number; heading: number; dist: number } | undefined;
+): TrackHit | undefined {
+  let best: TrackHit | undefined;
   const cursor = { x: worldX, y: worldY };
   for (const piece of pieces) {
-    if (piece.id === ignorePieceId || piece.type === "signal") continue;
-    for (const local of piecePaths(piece)) {
+    if (piece.id === ignorePieceId || !isTrackPiece(piece)) continue;
+    piecePaths(piece).forEach((local, pathIndex) => {
       const path = worldPath(piece, local);
+      let along = 0;
       for (let i = 1; i < path.length; i += 1) {
         const a = path[i - 1];
         const b = path[i];
         const dx = b.x - a.x;
         const dy = b.y - a.y;
+        const seg = Math.hypot(dx, dy);
         const len2 = dx * dx + dy * dy || 1;
         const t = Math.max(0, Math.min(1, ((cursor.x - a.x) * dx + (cursor.y - a.y) * dy) / len2));
         const px = a.x + dx * t;
         const py = a.y + dy * t;
         const dist = Math.hypot(cursor.x - px, cursor.y - py);
         if (dist <= maxDist && (!best || dist < best.dist)) {
-          best = { x: px, y: py, heading: radToDeg(Math.atan2(dy, dx)), dist };
+          best = {
+            x: px,
+            y: py,
+            heading: radToDeg(Math.atan2(dy, dx)),
+            dist,
+            pieceId: piece.id,
+            alongMm: along + t * seg,
+            pathIndex,
+          };
         }
+        along += seg;
       }
-    }
+    });
   }
   return best;
 }
@@ -197,6 +219,19 @@ export function ghostAt(
   worldX: number,
   worldY: number,
 ): LayoutPiece {
+  if (placing.type === "rfid") {
+    const hit = nearestTrackPoint(pieces, worldX, worldY);
+    if (hit) {
+      return {
+        ...createPlacedPiece(placing, hit.x, hit.y, hit.heading, { preview: true }),
+        hostPieceId: hit.pieceId,
+        alongMm: hit.alongMm,
+        hostPath: hit.pathIndex,
+      };
+    }
+    return createPlacedPiece(placing, worldX, worldY, 0, { preview: true });
+  }
+
   if (placing.type === "signal") {
     const pose = poseBesideTrack(worldX, worldY, pieces);
     if (pose) {
@@ -259,6 +294,19 @@ export function tryFitStraight(
 }
 
 export function snapMovedPiece(piece: LayoutPiece, others: LayoutPiece[]): LayoutPiece {
+  if (piece.type === "rfid") {
+    const hit = nearestTrackPoint(others, piece.x, piece.y, SIGNAL_SNAP_MM, piece.id);
+    if (!hit) return piece;
+    return {
+      ...piece,
+      hostPieceId: hit.pieceId,
+      alongMm: hit.alongMm,
+      hostPath: hit.pathIndex,
+      x: hit.x,
+      y: hit.y,
+      rotationDeg: hit.heading,
+    };
+  }
   if (piece.type === "signal") {
     const pose = poseBesideTrack(piece.x, piece.y, others, piece.id);
     return pose ? { ...piece, ...pose } : piece;

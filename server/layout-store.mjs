@@ -95,3 +95,53 @@ export function deleteNamed(name) {
   if (readMeta().name === name) writeMeta(null);
   return true;
 }
+
+function rosterPath() {
+  return join(DATA_DIR, "roster.json");
+}
+
+function asRosterAddress(value) {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  const address = Math.round(n);
+  if (address < 1 || address > 10239) return null;
+  return address;
+}
+
+export function parseRoster(raw) {
+  const locosRaw = Array.isArray(raw)
+    ? raw
+    : raw && typeof raw === "object" && Array.isArray(raw.locos)
+      ? raw.locos
+      : [];
+  const locos = [];
+  for (const [index, item] of locosRaw.entries()) {
+    if (!item || typeof item !== "object") continue;
+    const id =
+      typeof item.id === "string" && item.id.trim()
+        ? item.id.trim()
+        : `loco-${index + 1}`;
+    locos.push({
+      id,
+      address: asRosterAddress(item.address),
+      name: typeof item.name === "string" ? item.name : "",
+      tag: typeof item.tag === "string" ? item.tag : "",
+    });
+  }
+  return { locos };
+}
+
+export function readRoster() {
+  if (!existsSync(rosterPath())) return { locos: [] };
+  try {
+    return parseRoster(JSON.parse(readFileSync(rosterPath(), "utf8")));
+  } catch {
+    return { locos: [] };
+  }
+}
+
+export function writeRoster(roster) {
+  ensureDataDir();
+  writeFileSync(rosterPath(), `${JSON.stringify(parseRoster(roster), null, 2)}\n`);
+}

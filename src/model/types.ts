@@ -2,7 +2,7 @@ import { runtimeBrokerDefaults } from "../config";
 
 export type EditorMode = "plan" | "run";
 
-export type PieceType = "straight" | "curve" | "point" | "signal";
+export type PieceType = "straight" | "curve" | "point" | "signal" | "rfid";
 
 export type CurveSku = "11000" | "15000" | "16000";
 export type PointSku = "12000" | "12100" | "16040" | "16140";
@@ -64,6 +64,15 @@ export interface PointMqttConfig {
   statusTopic?: string;
 }
 
+export interface RosterLoco {
+  id: string;
+  address: number | null;
+  name: string;
+  tag: string;
+}
+
+export const DEFAULT_RFID_FADE_MS = 5000;
+
 export interface LayoutPiece {
   id: string;
   type: PieceType;
@@ -78,6 +87,11 @@ export interface LayoutPiece {
   leverInside?: boolean;
   pointState?: PointState;
   signalState?: SignalState;
+  hostPieceId?: string;
+  alongMm?: number;
+  hostPath?: number;
+  fadeMs?: number;
+  nameOpposite?: boolean;
   mqtt?: PointMqttConfig;
 }
 
@@ -130,9 +144,23 @@ export function emptyLayout(): LayoutDocument {
   };
 }
 
+export function isTrackPiece(piece: Pick<LayoutPiece, "type">): boolean {
+  return piece.type === "straight" || piece.type === "curve" || piece.type === "point";
+}
+
 let pieceIdSerial = 0;
+let rosterIdSerial = 0;
 
 export function newPieceId(): string {
   pieceIdSerial += 1;
   return `p-${pieceIdSerial}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function newRosterId(): string {
+  rosterIdSerial += 1;
+  return `loco-${rosterIdSerial}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function emptyRosterLoco(): RosterLoco {
+  return { id: newRosterId(), address: null, name: "", tag: "" };
 }

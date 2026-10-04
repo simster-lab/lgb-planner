@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from "react";
 import { dccexService } from "../dccex/client";
 import { useEditor } from "../editor/store";
+import type { RosterLoco } from "../model/types";
 import { DraftNumberInput } from "./DraftNumberInput";
 
 const FUNC_COUNT = 10;
@@ -45,16 +46,23 @@ function sendCabThrottle(address: number, speedPercent: number, forward: boolean
   dccexService.send(`<t ${address} ${toDccSpeed(speedPercent)} ${dir}>`);
 }
 
+function locoLabel(loco: RosterLoco): string {
+  const name = loco.name.trim() || "Unnamed";
+  return loco.address == null ? name : `${name} · ${loco.address}`;
+}
+
 function ThrottleCard({
   card,
   connected,
   canRemove,
+  roster,
   onChange,
   onRemove,
 }: {
   card: CabCard;
   connected: boolean;
   canRemove: boolean;
+  roster: RosterLoco[];
   onChange: (next: CabCard) => void;
   onRemove: () => void;
 }) {
@@ -74,6 +82,19 @@ function ThrottleCard({
     if (next === card.cab) return;
     if (card.acquired) dispense(card.cab, next);
     else patch({ cab: next });
+  };
+
+  const selectedLocoId =
+    roster.find((loco) => loco.address != null && loco.address === card.cab)?.id ?? "";
+
+  const pickLoco = (locoId: string) => {
+    if (!locoId) {
+      setCabAddress(null);
+      return;
+    }
+    const loco = roster.find((item) => item.id === locoId);
+    if (!loco || loco.address == null) return;
+    setCabAddress(loco.address);
   };
 
   const acquire = () => {
@@ -137,6 +158,19 @@ function ThrottleCard({
 
       <div className="throttle-main">
         <div className="throttle-row">
+          {roster.length > 0 ? (
+            <label className="field throttle-loco">
+              <span>Loco</span>
+              <select value={selectedLocoId} onChange={(event) => pickLoco(event.target.value)}>
+                <option value="">Address…</option>
+                {roster.map((loco) => (
+                  <option key={loco.id} value={loco.id} disabled={loco.address == null}>
+                    {locoLabel(loco)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <label className="field throttle-cab">
             <span>DCC address</span>
             <DraftNumberInput
@@ -195,7 +229,7 @@ function ThrottleCard({
 }
 
 export function Throttle() {
-  const { dccexStatus } = useEditor();
+  const { dccexStatus, roster } = useEditor();
   const connected = dccexStatus === "connected";
   const powerSwitchId = useId();
   const [powerOn, setPowerOn] = useState(false);
@@ -267,6 +301,7 @@ export function Throttle() {
             card={card}
             connected={connected}
             canRemove={cards.length > 1}
+            roster={roster}
             onChange={(next) => updateCard(card.id, next)}
             onRemove={() => removeCard(card.id)}
           />

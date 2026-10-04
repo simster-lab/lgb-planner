@@ -22,6 +22,6 @@ docker compose up --build
 
 Then open http://127.0.0.1:8080
 
-Full Unraid install (build on the server, Add Container, env vars, MQTT notes): **[docs/unraid.md](docs/unraid.md)**. The Unraid **Repository** field must be exactly `lgb-planner:latest` (the local image tag), not a Docker Hub name. Settings use MQTT TCP **1883**, same as Node-RED.
+Full Unraid install (pull the image, Add Container, env vars, MQTT notes): **[docs/unraid.md](docs/unraid.md)**. The Unraid **Repository** field must be exactly `ghcr.io/simster-lab/lgb-planner:latest`. Settings use MQTT TCP **1883**, same as Node-RED.
 
-Updates: copy new files onto Unraid, rebuild, **remove** the container, then Apply the template. Stop/Start and browser refresh keep the old image. See **[docs/unraid.md](docs/unraid.md)** section 7.
+Updates: on this PC run `./scripts/publish-image.sh` (builds `linux/amd64` and pushes that image). On Unraid use **Docker → Check for Updates → Update**. Stop/Start and a browser refresh keep the old image. See **[docs/unraid.md](docs/unraid.md)** section 7.

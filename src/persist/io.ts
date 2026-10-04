@@ -10,11 +10,20 @@ import type {
   PieceType,
   PointMqttConfig,
   PointState,
+  RosterLoco,
   SignalState,
 } from "../model/types";
-import { defaultBrokerConfig, defaultDccexConfig, emptyLayout, newPieceId } from "../model/types";
+import {
+  DEFAULT_RFID_FADE_MS,
+  defaultBrokerConfig,
+  defaultDccexConfig,
+  emptyLayout,
+  emptyRosterLoco,
+  newPieceId,
+} from "../model/types";
 
 const STORAGE_KEY = "lgb-planner-layout";
+const ROSTER_STORAGE_KEY = "lgb-planner-roster";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -66,7 +75,13 @@ function parseBroker(value: unknown): BrokerConfig {
 function parsePiece(value: unknown): LayoutPiece | undefined {
   if (!isRecord(value)) return undefined;
   const type = value.type;
-  if (type !== "straight" && type !== "curve" && type !== "point" && type !== "signal") {
+  if (
+    type !== "straight" &&
+    type !== "curve" &&
+    type !== "point" &&
+    type !== "signal" &&
+    type !== "rfid"
+  ) {
     return undefined;
   }
   const pieceType = type as PieceType;
@@ -93,7 +108,7 @@ function parsePiece(value: unknown): LayoutPiece | undefined {
           payloadDiverge: "diverge",
           statusTopic: "",
         }
-      : pieceType === "signal"
+      : pieceType === "signal" || pieceType === "rfid"
         ? {
             topic: "",
             payloadThrough: "through",
@@ -118,10 +133,41 @@ function parsePiece(value: unknown): LayoutPiece | undefined {
     leverInside: value.leverInside === true ? true : undefined,
     pointState,
     signalState,
-    mqtt: pieceType === "point" || pieceType === "signal"
-      ? parseMqtt(value.mqtt) ?? defaultMqtt
-      : undefined,
+    hostPieceId: pieceType === "rfid" && typeof value.hostPieceId === "string" ? value.hostPieceId : undefined,
+    alongMm: pieceType === "rfid" ? asNumber(value.alongMm, 0) : undefined,
+    hostPath: pieceType === "rfid" && typeof value.hostPath === "number" ? value.hostPath : undefined,
+    fadeMs: pieceType === "rfid" ? asNumber(value.fadeMs, DEFAULT_RFID_FADE_MS) : undefined,
+    nameOpposite: pieceType === "rfid" && value.nameOpposite === true ? true : undefined,
+    mqtt:
+      pieceType === "point" || pieceType === "signal" || pieceType === "rfid"
+        ? parseMqtt(value.mqtt) ?? defaultMqtt
+        : undefined,
   };
+}
+
+function parseRosterLoco(value: unknown): RosterLoco | undefined {
+  if (!isRecord(value)) return undefined;
+  const address =
+    typeof value.address === "number" && Number.isFinite(value.address)
+      ? Math.round(value.address)
+      : null;
+  return {
+    id: asString(value.id, emptyRosterLoco().id),
+    address: address != null && address >= 1 && address <= 10239 ? address : null,
+    name: asString(value.name),
+    tag: asString(value.tag),
+  };
+}
+
+export function parseRoster(raw: unknown): RosterLoco[] {
+  const locosRaw = Array.isArray(raw)
+    ? raw
+    : isRecord(raw) && Array.isArray(raw.locos)
+      ? raw.locos
+      : [];
+  return locosRaw
+    .map(parseRosterLoco)
+    .filter((loco): loco is RosterLoco => loco !== undefined);
 }
 
 export function parseLayout(raw: unknown): LayoutDocument {
@@ -159,6 +205,20 @@ export function writeAutosave(layout: LayoutDocument): void {
 
 export function clearAutosave(): void {
   localStorage.removeItem(STORAGE_KEY);
+}
+
+export function loadRosterAutosave(): RosterLoco[] | undefined {
+  try {
+    const raw = localStorage.getItem(ROSTER_STORAGE_KEY);
+    if (!raw) return undefined;
+    return parseRoster(JSON.parse(raw));
+  } catch {
+    return undefined;
+  }
+}
+
+export function writeRosterAutosave(locos: RosterLoco[]): void {
+  localStorage.setItem(ROSTER_STORAGE_KEY, JSON.stringify({ locos }));
 }
 
 export function sanitizeCircuitName(raw: string): string | undefined {

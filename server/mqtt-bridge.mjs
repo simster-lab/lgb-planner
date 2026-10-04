@@ -11,12 +11,15 @@ import {
   ensureDataDir,
   isLayoutDocument,
   listNamed,
+  parseRoster,
   readCurrent,
   readMeta,
   readNamed,
+  readRoster,
   sanitizeCircuitName,
   writeCurrent,
   writeNamed,
+  writeRoster,
 } from "./layout-store.mjs";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -417,6 +420,39 @@ async function handleLayoutApi(req, res, path) {
   return false;
 }
 
+async function handleRosterApi(req, res, path) {
+  if (path !== "/api/roster") return false;
+
+  const cors = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, PUT, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+  };
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, cors);
+    res.end();
+    return true;
+  }
+
+  try {
+    if (req.method === "GET") {
+      sendJson(res, 200, readRoster());
+      return true;
+    }
+    if (req.method === "PUT") {
+      const roster = parseRoster(JSON.parse((await readBody(req, 200_000)) || "{}"));
+      writeRoster(roster);
+      sendJson(res, 200, roster);
+      return true;
+    }
+  } catch (error) {
+    sendJson(res, 400, { ok: false, error: error instanceof Error ? error.message : "bad request" });
+    return true;
+  }
+
+  return false;
+}
+
 function safeStaticPath(urlPath) {
   const clean = decodeURIComponent(urlPath.split("?")[0] || "/");
   const relative = clean === "/" ? "index.html" : clean.replace(/^\/+/, "");
@@ -455,6 +491,7 @@ const httpServer = createServer(async (req, res) => {
   const path = url.split("?")[0];
 
   if (await handleLayoutApi(req, res, path)) return;
+  if (await handleRosterApi(req, res, path)) return;
 
   if (req.method === "OPTIONS" && (path === "/api/broker" || path.startsWith("/api/"))) {
     res.writeHead(204, {

@@ -1,5 +1,5 @@
-import type { LayoutDocument } from "../model/types";
-import { parseLayout } from "./io";
+import type { LayoutDocument, RosterLoco } from "../model/types";
+import { parseLayout, parseRoster } from "./io";
 
 export type CircuitPayload = { layout: LayoutDocument; name: string | null };
 
@@ -100,5 +100,28 @@ export async function importCircuit(name: string, layout: LayoutDocument): Promi
     return asPayload(await readJson(response)) ?? { layout, name };
   } catch {
     return undefined;
+  }
+}
+
+export async function fetchRoster(): Promise<RosterLoco[] | "offline"> {
+  try {
+    const response = await fetch("/api/roster", { cache: "no-store" });
+    if (!response.ok) return "offline";
+    return parseRoster(await readJson(response));
+  } catch {
+    return "offline";
+  }
+}
+
+export async function saveRoster(locos: RosterLoco[]): Promise<boolean> {
+  try {
+    const response = await fetch("/api/roster", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ locos }),
+    });
+    return response.ok;
+  } catch {
+    return false;
   }
 }

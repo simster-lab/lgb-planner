@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { useEditor } from "../editor/store";
+import { Roster } from "./Roster";
 import { mqttService } from "../mqtt/client";
 import { dccexService } from "../dccex/client";
 import { defaultBrokerConfig, defaultDccexConfig } from "../model/types";
@@ -23,6 +24,7 @@ export function Toolbar() {
   const mqtt = layout.settings.mqtt ?? defaultBrokerConfig();
   const dccex = layout.settings.dccex ?? defaultDccexConfig();
   const [openOpen, setOpenOpen] = useState(false);
+  const [rosterOpen, setRosterOpen] = useState(false);
   const [names, setNames] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
@@ -214,6 +216,9 @@ export function Toolbar() {
         >
           {dccexStatus === "connected" ? "DCC-EX connected" : "DCC-EX connect"}
         </button>
+        <button type="button" onClick={() => setRosterOpen(true)}>
+          Roster
+        </button>
         <button type="button" onClick={() => dispatch({ type: "setSettingsOpen", open: true })}>
           Settings
         </button>
@@ -250,6 +255,7 @@ export function Toolbar() {
           </div>
         </div>
       ) : null}
+      {rosterOpen ? <Roster onClose={() => setRosterOpen(false)} /> : null}
     </header>
   );
 }

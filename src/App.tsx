@@ -1,7 +1,9 @@
 import { useEffect } from "react";
 import { EditorCanvas } from "./editor/Canvas";
 import { flipPiece } from "./editor/pieceFactory";
+import { lookupRosterName, startRfidFlash } from "./editor/rfidFlash";
 import { EditorProvider, useEditor } from "./editor/store";
+import { DEFAULT_RFID_FADE_MS } from "./model/types";
 import { mqttService } from "./mqtt/client";
 import { dccexService } from "./dccex/client";
 import { Inspector } from "./ui/Inspector";
@@ -12,7 +14,7 @@ import { Toolbar } from "./ui/Toolbar";
 import "./App.css";
 
 function EditorApp() {
-  const { layout, selectedIds, placing, pasting, editorMode, dispatch, replacePiece, replacePieces, settingsOpen } =
+  const { layout, selectedIds, placing, pasting, editorMode, dispatch, replacePiece, replacePieces, settingsOpen, roster } =
     useEditor();
 
   useEffect(() => {
@@ -39,9 +41,13 @@ function EditorApp() {
             dispatch({ type: "previewPiece", piece: { ...piece, signalState: "clear" } });
           }
         }
+        if (piece.type === "rfid") {
+          const name = lookupRosterName(payload, roster);
+          if (name) startRfidFlash(piece.id, name, piece.fadeMs ?? DEFAULT_RFID_FADE_MS);
+        }
       }
     });
-  }, [dispatch, layout.pieces]);
+  }, [dispatch, layout.pieces, roster]);
 
   useEffect(() => {
     const topics = layout.pieces

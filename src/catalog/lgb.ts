@@ -154,6 +154,7 @@ export function pieceLabel(piece: LayoutPiece): string {
     const spec = signalSpec(piece.sku);
     return spec ? spec.label : "Signal";
   }
+  if (piece.type === "rfid") return "RFID sensor";
   const spec = pointSpec(piece.sku);
   return spec ? spec.label : "Point";
 }
@@ -170,7 +171,7 @@ export function localArcPoint(radiusMm: number, angleRad: number, hand: Hand): {
 }
 
 export function localPorts(piece: LayoutPiece): LocalPort[] {
-  if (piece.type === "signal") return [];
+  if (piece.type === "signal" || piece.type === "rfid") return [];
 
   if (piece.type === "straight") {
     const length = Math.max(1, piece.lengthMm ?? 300);

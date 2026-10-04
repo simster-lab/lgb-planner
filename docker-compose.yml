@@ -1,7 +1,7 @@
 services:
   lgb-planner:
     build: .
-    image: lgb-planner
+    image: ghcr.io/simster-lab/lgb-planner:latest
     ports:
       - "8080:8080"
     volumes:

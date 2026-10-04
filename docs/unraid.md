@@ -27,34 +27,21 @@ Note:
 - TCP port (usually `1883`)
 - Username/password only if the broker requires them
 
-## 2. Copy the project onto Unraid
+## 2. Data folder
 
 SSH or **Terminal** in the Unraid web UI:
 
 ```bash
-mkdir -p /mnt/user/appdata/lgb-planner
+mkdir -p /mnt/user/appdata/lgb-planner/data
 ```
 
-Clone or copy this repository into that folder so `Dockerfile` is at `/mnt/user/appdata/lgb-planner/Dockerfile`.
+Unraid does **not** need a copy of this git repository, and it does not build the image. Circuits are stored in that `data` folder. The container comes from GitHub Container Registry.
 
-## 3. Build the image
+## 3. Image
 
-The image name is **`lgb-planner`** (LGB, then hyphen, then planner). It is easy to mistype as `lbg-planner`. The Unraid **Repository** field in the next step must match this tag **exactly**.
+The image is **`ghcr.io/simster-lab/lgb-planner:latest`**. It is built on a PC and pushed to the GitHub repo’s container registry. Unraid only pulls it.
 
-```bash
-cd /mnt/user/appdata/lgb-planner
-docker build -t lgb-planner .
-```
-
-Wait until the last lines look like `Successfully tagged lgb-planner:latest` (wording varies slightly by Docker version). Then confirm it is local:
-
-```bash
-docker images lgb-planner
-```
-
-You should see a row with `REPOSITORY` = `lgb-planner` and `TAG` = `latest`. If that command prints no rows, the build did not tag the name you think it did — do not go on to Add Container yet.
-
-This image is **only on this server**. It is not on Docker Hub. If Unraid later says `pull access denied`, it is trying to download a name that does not exist locally (almost always a typo in Repository).
+The name is easy to mistype as `lbg-planner`. The Unraid **Repository** field in the next step must match this name **exactly**.
 
 ## 4. Add the container (Unraid UI)
 
@@ -71,13 +58,13 @@ These are different fields.
 | Field | What to type | What it is |
 | --- | --- | --- |
 | **Name** | `LGB-Planner` (or anything you like) | Container name in the Unraid list. Unraid often capitalises this. It does **not** have to match the image. |
-| **Repository** | `lgb-planner:latest` | The image you built in step 3. Must match `docker images` exactly. |
-| **Registry URL** | *leave empty* | If this is `https://hub.docker.com/` or similar, Unraid will try to pull from the internet and fail. |
-| **Icon URL** | `https://raw.githubusercontent.com/simster-lab/lgb-planner/main/docs/unraid-icon.png` | Docker tab icon. If this is empty, Unraid looks up `lgb-planner` on Docker Hub, fails, and **spams the syslog**. |
+| **Repository** | `ghcr.io/simster-lab/lgb-planner:latest` | The image on GitHub Container Registry. |
+| **Registry URL** | *leave empty* | The host is already in the Repository name (`ghcr.io`). |
+| **Icon URL** | `https://raw.githubusercontent.com/simster-lab/lgb-planner/main/docs/unraid-icon.png` | Docker tab icon. If this is empty, Unraid looks up the name on Docker Hub, fails, and **spams the syslog**. |
 
-Do **not** type `lbg-planner`. Do not type `docker.io/lgb-planner` unless you have actually published the image.
+Do **not** type `lbg-planner`. Do **not** type `lgb-planner:latest` (that is a local tag, and this image is not published under that name).
 
-If your Unraid build has a checkbox such as **Always pull image**, leave it **off**. A pull will look on Docker Hub, not at the local build.
+Apply pulls the image. If Unraid says `pull access denied` or `denied`, the GitHub package is still private. On GitHub: **Packages → lgb-planner → Package settings → Change visibility → Public**. No login is required on Unraid once the package is public.
 
 ### Network, restart, WebUI
 
@@ -129,7 +116,7 @@ Click **Add another…** → **Path**:
 | Container Path | `/data` |
 | Host Path | `/mnt/user/appdata/lgb-planner/data` |
 
-The git/source tree used for `docker build` is **not** this folder. Circuits land in `data/current.lgb.json` and `data/layouts/<name>.lgb.json`.
+Circuits land in `data/current.lgb.json` and `data/layouts/<name>.lgb.json`. The image does not store them.
 
 **Open / Save / Save as** use those Unraid files. **Import** copies a `.lgb.json` from this computer onto the array and loads it. **Download** saves a copy onto this computer (USB/backup); it is not a substitute for Save.
 
@@ -137,19 +124,19 @@ MQTT *messages* (point throws, Send test) still go to Mosquitto. Saving a circui
 
 ### Check the command preview, then Apply
 
-The generated command at the bottom must end with the **local** image name, for example:
+The generated command at the bottom must end with the registry image, for example:
 
 ```
 -p '8080:8080/tcp'
   -e MQTT_HOST="192.168.1.50"
-  'lgb-planner:latest'
+  'ghcr.io/simster-lab/lgb-planner:latest'
 ```
 
-If the last token is `'lbg-planner'` or `'lbg-planner:latest'`, fix **Repository** before you click Apply.
+If the last token is `'lgb-planner:latest'`, `'lbg-planner'`, or `'lbg-planner:latest'`, fix **Repository** before you click Apply.
 
-Click **Apply**. Unraid should **not** print `Unable to find image` or `pull access denied`. It should start the container.
+Click **Apply**. Unraid pulls the image and starts the container.
 
-If Apply already failed, you do not need to rebuild. Edit the same container (or Add Container again), set **Repository** to `lgb-planner:latest`, confirm `docker images lgb-planner` still lists it, and Apply again.
+If Apply already failed, edit the same container (or Add Container again), set **Repository** to `ghcr.io/simster-lab/lgb-planner:latest`, and Apply again.
 
 ## 5. Equivalent `docker run`
 
@@ -162,7 +149,7 @@ docker run -d --name LGB-Planner --restart unless-stopped \
   -e MQTT_HOST=192.168.0.2 \
   -e MQTT_PORT=1883 \
   -e MQTT_TLS=false \
-  lgb-planner:latest
+  ghcr.io/simster-lab/lgb-planner:latest
 ```
 
 ## 6. First launch
@@ -177,72 +164,60 @@ If Settings still shows `localhost` or port `9001`, this browser already had a s
 
 ## 7. Updates (browser refresh does nothing)
 
-The PC project and Unraid are **two copies**. Editing files on your PC, or pressing Shift+F5 in the browser, does not change what the container is serving.
+Editing files on your PC, or pressing Shift+F5 in the browser, does not change what the container is serving. Unraid keeps running the image it last pulled.
 
-A running container is glued to the image id it was **created** with. **Stop / Start does not pick up a new `docker build`.** You must copy files onto Unraid, rebuild, **remove** the container, then Apply the template again.
+**Stop / Start does not pull.** Publish a new image, then use Unraid’s update button so it pulls and recreates the container. The data path is kept.
 
-### On Unraid (terminal)
+### On the PC
 
-1. Copy the latest project into `/mnt/user/appdata/lgb-planner` (USB, `scp`, Syncthing, `git pull` — whatever you use). Confirm the Unraid copy is new:
-
-```bash
-grep __BUILD_TIME__ /mnt/user/appdata/lgb-planner/src/ui/Toolbar.tsx
-```
-
-If that prints nothing, Unraid still has the old source. Do not build yet.
-
-2. Rebuild and drop the old container:
+One-time login (a GitHub personal access token with `write:packages`; it is not stored in this repo):
 
 ```bash
-cd /mnt/user/appdata/lgb-planner
-chmod +x scripts/unraid-update.sh
-./scripts/unraid-update.sh
+echo TOKEN | podman login --authfile "$HOME/.config/containers/auth.json" ghcr.io -u simster-lab --password-stdin
 ```
 
-Or by hand:
+That file stays after a reboot. A plain `podman login` stores the token under `/run`, which is cleared when the PC restarts. Use `docker login` instead if `docker` is the command that exists on that PC. Podman is enough; you do not need both. Docker’s own login file already survives a reboot.
+
+After the first push, set the package **public**: GitHub → **Packages → lgb-planner → Package settings → Change visibility**. Packages start private even when the git repo is public. A public package is what lets Unraid pull with no registry login.
+
+Each update:
 
 ```bash
-cd /mnt/user/appdata/lgb-planner
-docker build --no-cache -t lgb-planner:latest .
-docker stop LGB-Planner
-docker rm LGB-Planner
+./scripts/publish-image.sh
 ```
 
-3. In Unraid **Docker**, open your existing LGB-Planner template (Add Container → your saved template) and **Apply**. Same name, ports, env. Add the **data** path (`/mnt/user/appdata/lgb-planner/data` → `/data`) if it is not there yet. Repository stays `lgb-planner:latest`.
+That builds `linux/amd64` (Unraid’s architecture) and pushes `ghcr.io/simster-lab/lgb-planner:latest` as a Docker manifest. Podman’s usual OCI manifest is invisible to Unraid’s update check, which then says no update is available.
 
-4. Open the planner (any browser). The toolbar must show a **new** `build YYYY-MM-DD HH:MM` (the time you ran `docker build` on Unraid). If it does not, the template did not recreate from the new image — check the command preview still ends with `lgb-planner:latest`.
+### On Unraid
 
-Changing only `MQTT_*` variables: edit the container, Apply. No rebuild.
+1. If this container was created from a local `lgb-planner:latest` build, edit the template once: **Repository** `ghcr.io/simster-lab/lgb-planner:latest`, **Registry URL** empty, **Apply**. Keep the port, MQTT variables, and `/mnt/user/appdata/lgb-planner/data` → `/data` path.
+2. Later: **Docker → Check for Updates → Update**.
 
-### Confirm image vs container
+Open the planner. The toolbar must show a **new** `build YYYY-MM-DD HH:MM` (the time `publish-image.sh` built the image). If it does not, Unraid is still on the previous image — Check for Updates again, and confirm the command preview ends with `ghcr.io/simster-lab/lgb-planner:latest`.
 
-```bash
-docker inspect --format 'container image: {{.Image}}' LGB-Planner
-docker images -q lgb-planner:latest
-```
+Changing only `MQTT_*` variables: edit the container, Apply. No new image.
 
-Those ids must match. If they do not, you started an old container; go back to step 2.
+`scripts/unraid-update.sh` only prints these steps. It does not build on the server.
 
 ## 8. Troubleshooting
 
-### `Unable to find image 'lbg-planner:latest' locally` / `pull access denied`
+### `Unable to find image` / `pull access denied` / `denied`
 
-Unraid is using a **Repository** name that is not on this server, so Docker tries Docker Hub and is refused.
+Unraid is not pulling `ghcr.io/simster-lab/lgb-planner:latest`, or the GitHub package is still private.
 
-1. In a terminal: `docker images lgb-planner` — you want `lgb-planner` / `latest`.
-2. In the container template, set **Repository** to `lgb-planner:latest` (LGB, not LBG).
-3. Clear **Registry URL**.
-4. Turn **Always pull image** off if you have that option.
-5. Apply again. You do not need to `docker build` a second time if the image is already listed.
+1. In the container template, set **Repository** to `ghcr.io/simster-lab/lgb-planner:latest` (LGB, not LBG; include `ghcr.io/simster-lab/`).
+2. Clear **Registry URL**.
+3. On GitHub, make the **lgb-planner** package public if this is the first publish.
+4. Apply again.
 
 **Name** (`LGB-Planner`) can stay as it is. Only **Repository** must match the image.
 
 ### Which build is this? / still the old page after refresh
 
-Shift+F5 and a second browser only reload what the **container** is already serving. They cannot pull new source from your PC.
+Shift+F5 and a second browser only reload what the **container** is already serving. They cannot pull a new image.
 
-- No `build YYYY-MM-DD HH:MM` in the toolbar → this container was built **before** that stamp existed. You are not on the latest files.
-- Stamp present but the minute never changes → Unraid was not given new source, or the container was only Stop/Started after `docker build`.
+- No `build YYYY-MM-DD HH:MM` in the toolbar → this container is an image from before that stamp existed.
+- Stamp present but the minute never changes → Unraid did not pull the image you just pushed, or the container was only Stop/Started.
 
 Follow [section 7](#7-updates-browser-refresh-does-nothing). Then open `http://TOWER:8080/?debug=1` for the click log.
 
@@ -250,14 +225,14 @@ Follow [section 7](#7-updates-browser-refresh-does-nothing). Then open `http://T
 
 | Symptom | Likely cause |
 | --- | --- |
-| Planner page will not load | Open the **host** port (`http://TOWER:8085` if you mapped 8085→8080). Log must say `listening on 0.0.0.0:8080`, not `:1883`. Do not add a container variable named `PORT`. Set `MQTT_HOST` to the broker LAN IP, not `localhost`. Recreate after rebuild. |
+| Planner page will not load | Open the **host** port (`http://TOWER:8085` if you mapped 8085→8080). Log must say `listening on 0.0.0.0:8080`, not `:1883`. Do not add a container variable named `PORT`. Set `MQTT_HOST` to the broker LAN IP, not `localhost`. Update the container after a new image. |
 | MQTT stays disconnected | Container cannot reach `MQTT_HOST:1883` (wrong IP, firewall, or Mosquitto not listening on TCP) |
 | MQTT shows connected, broker sees nothing | Connected is the TCP link. Publish only happens when you throw a point/signal, press Through/Diverge, or **Send test** (`lgb-planner/test` = `ping`). Changing the topic field does not send. Container log should print `MQTT out …` for each publish. |
 | Circuit missing after recreate | Template has no Path `/data`. Add host `/mnt/user/appdata/lgb-planner/data` → container `/data`, Apply. |
 | Two browsers overwrite each other | Last write wins. Use **Save as** names if you need separate circuits. |
 | Works in Node-RED, not here | Saved Settings still have port `9001` — set **1883**, Save & connect |
-| Status cycles connected / disconnected | Old image (browser WS to 1883). Rebuild and **recreate** the container |
+| Status cycles connected / disconnected | Old image (browser WS to 1883). Publish a new image and **Update** the container |
 | HTTPS reverse proxy, MQTT fails | Page is HTTPS so the planner WS is `wss` to the **same** proxy host, not to Mosquitto |
-| Docker tab missing icon / syslog spam about a missing image | Empty **Icon URL**. Unraid then tries Docker Hub for `lgb-planner`. Edit the container (Advanced View), set Icon URL to `https://raw.githubusercontent.com/simster-lab/lgb-planner/main/docs/unraid-icon.png`, Apply. No rebuild. Repo must be **public** for that URL to work. |
+| Docker tab missing icon / syslog spam about a missing image | Empty **Icon URL**. Unraid then tries Docker Hub for the short name. Edit the container (Advanced View), set Icon URL to `https://raw.githubusercontent.com/simster-lab/lgb-planner/main/docs/unraid-icon.png`, Apply. No new image. The git repo must be **public** for that URL to work. |
 
 The planner container talks to Mosquitto over TCP (like Node-RED). If MQTT Explorer or Node-RED can use `192.168.0.2:1883`, this app can too after Settings use that host and port **and** this image includes the TCP bridge.

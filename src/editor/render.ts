@@ -11,6 +11,8 @@ import {
 } from "../catalog/lgb";
 import { degToRad, localToWorld, worldPorts } from "../model/geometry";
 import type { EditorMode, Hand, LayoutPiece, PortId, Vec2, ViewState, WorldPort } from "../model/types";
+import { isTrackPiece } from "../model/types";
+import type { RfidFlashOverlay } from "./rfidFlash";
 
 export interface Bounds {
   minX: number;
@@ -31,6 +33,8 @@ export interface DrawExtras {
   liveSections?: { colour: string; paths: Vec2[][] }[];
   attachPortId?: PortId;
   marquee?: { x0: number; y0: number; x1: number; y1: number; crossing: boolean };
+  rfidFlashes?: RfidFlashOverlay[];
+  pieces?: LayoutPiece[];
 }
 
 function sampleArc(radiusMm: number, angleDeg: number, hand: Hand, stepMm = 14): Vec2[] {
@@ -53,8 +57,48 @@ function sampleStraight(lengthMm: number, stepMm = 20): Vec2[] {
   return pts;
 }
 
+export function pointAlongPath(path: Vec2[], alongMm: number): { x: number; y: number; heading: number } | undefined {
+  if (path.length === 0) return undefined;
+  if (path.length === 1) return { x: path[0].x, y: path[0].y, heading: 0 };
+  let remaining = Math.max(0, alongMm);
+  for (let i = 1; i < path.length; i += 1) {
+    const a = path[i - 1];
+    const b = path[i];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const heading = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+    if (remaining <= len || i === path.length - 1) {
+      const t = len > 0 ? Math.min(1, remaining / len) : 0;
+      return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, heading };
+    }
+    remaining -= len;
+  }
+  return undefined;
+}
+
+export function pointAlongPiece(
+  piece: LayoutPiece,
+  alongMm: number,
+  pathIndex = 0,
+): { x: number; y: number; heading: number } | undefined {
+  const locals = piecePaths(piece);
+  const local = locals[pathIndex] ?? locals[0];
+  if (!local) return undefined;
+  return pointAlongPath(worldPath(piece, local), alongMm);
+}
+
+export function rfidWorldPose(
+  piece: LayoutPiece,
+  pieces: LayoutPiece[],
+): { x: number; y: number; rotationDeg: number } {
+  const host = pieces.find((item) => item.id === piece.hostPieceId);
+  if (!host || !isTrackPiece(host)) return { x: piece.x, y: piece.y, rotationDeg: piece.rotationDeg };
+  const pose = pointAlongPiece(host, piece.alongMm ?? 0, piece.hostPath ?? 0);
+  if (!pose) return { x: piece.x, y: piece.y, rotationDeg: piece.rotationDeg };
+  return { x: pose.x, y: pose.y, rotationDeg: pose.heading };
+}
+
 export function piecePaths(piece: LayoutPiece): Vec2[][] {
-  if (piece.type === "signal") return [];
+  if (piece.type === "signal" || piece.type === "rfid") return [];
   if (piece.type === "straight") {
     return [sampleStraight(Math.max(1, piece.lengthMm ?? 300))];
   }
@@ -99,9 +143,14 @@ export function worldPath(piece: LayoutPiece, local: Vec2[]): Vec2[] {
   return local.map((p) => localToWorld(piece, p));
 }
 
-export function pieceBounds(piece: LayoutPiece, zoom = 1): Bounds {
+export function pieceBounds(piece: LayoutPiece, zoom = 1, pieces: LayoutPiece[] = []): Bounds {
   const pts: Vec2[] = [];
-  if (piece.type === "signal") {
+  if (piece.type === "rfid") {
+    const pose = rfidWorldPose(piece, pieces.length ? pieces : [piece]);
+    const pad = rfidPadSize(zoom);
+    pts.push({ x: pose.x - pad.along, y: pose.y - pad.across });
+    pts.push({ x: pose.x + pad.along, y: pose.y + pad.across });
+  } else if (piece.type === "signal") {
     const scale = signalScale(zoom);
     pts.push(localToWorld(piece, { x: 0, y: 0 }));
     pts.push(localToWorld(piece, { x: 0, y: -80 * scale }));
@@ -511,6 +560,117 @@ function drawPiece(
     const anim = extras.anim.get(piece.id) ?? (piece.signalState === "clear" ? 1 : 0);
     drawSignal(ctx, piece, anim, extras.hoverLeverId === piece.id, alpha, extras.zoom);
   }
+
+  if (piece.type === "rfid") {
+    drawRfid(ctx, piece, extras, alpha);
+  }
+}
+
+function rfidPadSize(zoom: number): { along: number; across: number } {
+  const scale = overlayScale(zoom, 28, 14);
+  return { along: 14 * scale, across: 28 * scale };
+}
+
+function drawRfid(ctx: CanvasRenderingContext2D, piece: LayoutPiece, extras: DrawExtras, alpha: number): void {
+  const hosts = extras.pieces ?? [];
+  const pose = rfidWorldPose(piece, hosts);
+  const selected = extras.selectedIds.includes(piece.id);
+  const pad = rfidPadSize(extras.zoom);
+  ctx.save();
+  ctx.translate(pose.x, pose.y);
+  ctx.rotate(degToRad(pose.rotationDeg));
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = selected ? "#7dffb0" : "#6a9aaa";
+  ctx.strokeStyle = selected ? "#17351f" : "#1a2a30";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(-pad.along, -pad.across, pad.along * 2, pad.across * 2, 4);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#1a2a30";
+  ctx.beginPath();
+  ctx.roundRect(-pad.along * 0.45, -pad.across * 0.28, pad.along * 0.9, pad.across * 0.56, 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+export type RfidNameSide = "above" | "below" | "left" | "right";
+
+const RFID_LABEL_GAP_MM = 110;
+
+function rfidLabelPerp(pose: { rotationDeg: number }): { x: number; y: number; defaultSign: number } {
+  const tangent = degToRad(pose.rotationDeg);
+  const x = -Math.sin(tangent);
+  const y = Math.cos(tangent);
+  const defaultSign = y > 0.001 || (Math.abs(y) <= 0.001 && x < 0) ? -1 : 1;
+  return { x, y, defaultSign };
+}
+
+export function rfidNameOppositeForSide(
+  piece: LayoutPiece,
+  pieces: LayoutPiece[],
+  side: RfidNameSide,
+): boolean {
+  return rfidNameSide({ ...piece, nameOpposite: undefined }, pieces) !== side;
+}
+
+export function rfidNameSide(piece: LayoutPiece, pieces: LayoutPiece[]): RfidNameSide {
+  const pose = rfidWorldPose(piece, pieces);
+  const perp = rfidLabelPerp(pose);
+  const sign = piece.nameOpposite ? -perp.defaultSign : perp.defaultSign;
+  const dx = sign * perp.x;
+  const dy = sign * perp.y;
+  if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? "right" : "left";
+  return dy >= 0 ? "below" : "above";
+}
+
+function rfidLabelAnchor(
+  piece: LayoutPiece,
+  pieces: LayoutPiece[],
+  zoom: number,
+): { x: number; y: number } {
+  const pose = rfidWorldPose(piece, pieces);
+  const scale = overlayScale(zoom, LABEL_NOMINAL_MM, LABEL_MIN_SCREEN_PX);
+  const perp = rfidLabelPerp(pose);
+  const sign = piece.nameOpposite ? -perp.defaultSign : perp.defaultSign;
+  const gap = RFID_LABEL_GAP_MM * scale;
+  return { x: pose.x + sign * perp.x * gap, y: pose.y + sign * perp.y * gap };
+}
+
+function drawRfidLabel(
+  ctx: CanvasRenderingContext2D,
+  piece: LayoutPiece,
+  pieces: LayoutPiece[],
+  name: string,
+  alpha: number,
+  zoom: number,
+): void {
+  const { x, y } = rfidLabelAnchor(piece, pieces, zoom);
+  const scale = overlayScale(zoom, LABEL_NOMINAL_MM, LABEL_MIN_SCREEN_PX);
+  const fontMm = LABEL_NOMINAL_MM * scale;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = `600 ${fontMm}px Inter, ui-sans-serif, system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineWidth = Math.max(3, 4 * scale);
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.72)";
+  ctx.lineJoin = "round";
+  ctx.strokeText(name, x, y);
+  ctx.fillStyle = "#efe6d2";
+  ctx.fillText(name, x, y);
+  ctx.restore();
+}
+
+function drawRfidFlash(
+  ctx: CanvasRenderingContext2D,
+  piece: LayoutPiece,
+  pieces: LayoutPiece[],
+  name: string,
+  alpha: number,
+  zoom: number,
+): void {
+  drawRfidLabel(ctx, piece, pieces, name, alpha, zoom);
 }
 
 function drawGrid(ctx: CanvasRenderingContext2D, view: ViewState, width: number, height: number): void {
@@ -569,12 +729,18 @@ export function drawScene(
   applyView(ctx, view, dpr);
   drawGrid(ctx, view, width, height);
 
-  const track = pieces.filter((piece) => piece.type !== "signal");
-  const signals = pieces.filter((piece) => piece.type === "signal");
-  for (const piece of track) drawPiece(ctx, piece, extras);
-  for (const piece of signals) drawPiece(ctx, piece, extras);
-  if (extras.ghost) drawPiece(ctx, extras.ghost, extras, true);
-  for (const piece of extras.ghosts ?? []) drawPiece(ctx, piece, extras, true);
+  const extrasWithPieces = { ...extras, pieces };
+  const track = pieces.filter((piece) => piece.type !== "signal" && piece.type !== "rfid");
+  const overlays = pieces.filter((piece) => piece.type === "signal" || piece.type === "rfid");
+  for (const piece of track) drawPiece(ctx, piece, extrasWithPieces);
+  for (const piece of overlays) drawPiece(ctx, piece, extrasWithPieces, false);
+  if (extras.ghost) drawPiece(ctx, extras.ghost, extrasWithPieces, true);
+  for (const piece of extras.ghosts ?? []) drawPiece(ctx, piece, extrasWithPieces, true);
+  for (const flash of extras.rfidFlashes ?? []) {
+    const piece = pieces.find((item) => item.id === flash.pieceId);
+    if (!piece || piece.type !== "rfid") continue;
+    drawRfidFlash(ctx, piece, pieces, flash.name, flash.alpha, extras.zoom);
+  }
 
   if (extras.editorMode === "run" && extras.liveSections) {
     for (const section of extras.liveSections) {
@@ -586,6 +752,11 @@ export function drawScene(
 
   for (const piece of track) {
     if (piece.type === "point" && piece.showName) drawPointName(ctx, piece, extras.zoom, 1);
+  }
+  for (const piece of overlays) {
+    if (piece.type === "rfid" && piece.showName) {
+      drawRfidLabel(ctx, piece, pieces, pieceLabel(piece), 1, extras.zoom);
+    }
   }
 
   if (extras.editorMode === "plan") {
@@ -644,8 +815,21 @@ export function drawScene(
   ctx.stroke();
 }
 
-export function hitTestPiece(piece: LayoutPiece, world: Vec2, threshold = 28, zoom = 1): boolean {
+export function hitTestRfid(piece: LayoutPiece, world: Vec2, zoom = 1, pieces: LayoutPiece[] = []): boolean {
+  const pose = rfidWorldPose(piece, pieces);
+  const pad = rfidPadSize(zoom);
+  return Math.hypot(world.x - pose.x, world.y - pose.y) <= Math.max(pad.across, 22);
+}
+
+export function hitTestPiece(
+  piece: LayoutPiece,
+  world: Vec2,
+  threshold = 28,
+  zoom = 1,
+  pieces: LayoutPiece[] = [],
+): boolean {
   if (piece.type === "signal") return hitTestSignal(piece, world, zoom);
+  if (piece.type === "rfid") return hitTestRfid(piece, world, zoom, pieces);
   for (const local of piecePaths(piece)) {
     const path = worldPath(piece, local);
     for (let i = 1; i < path.length; i += 1) {

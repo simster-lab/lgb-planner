@@ -19,7 +19,7 @@ function parsePortKey(key: string): { pieceId: string; portId: PortId } {
 }
 
 function livePortIds(piece: LayoutPiece): PortId[] {
-  if (piece.type === "signal") return [];
+  if (piece.type === "signal" || piece.type === "rfid") return [];
   if (piece.type === "point") {
     const live = piece.pointState === "diverge" ? "diverge" : "through";
     return ["a", live];
@@ -93,7 +93,7 @@ export function liveSections(pieces: LayoutPiece[]): LiveSection[] {
     const paths: Vec2[][] = [];
     for (const [pieceId, ports] of portsByPiece) {
       const piece = byId.get(pieceId);
-      if (!piece || piece.type === "signal") continue;
+      if (!piece || piece.type === "signal" || piece.type === "rfid") continue;
       const locals = piecePaths(piece);
       if (piece.type === "point") {
         if (ports.has("through") && locals[0]) paths.push(worldPath(piece, locals[0]));

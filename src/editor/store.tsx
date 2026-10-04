@@ -17,12 +17,13 @@ import type {
   MqttConnectionStatus,
   Placing,
   PointState,
+  RosterLoco,
   SignalState,
   ViewState,
 } from "../model/types";
 import { defaultBrokerConfig, defaultDccexConfig, emptyLayout } from "../model/types";
-import { loadAutosave, writeAutosave } from "../persist/io";
-import { fetchCurrentCircuit, saveCurrentCircuit } from "../persist/remote";
+import { loadAutosave, loadRosterAutosave, writeAutosave, writeRosterAutosave } from "../persist/io";
+import { fetchCurrentCircuit, fetchRoster, saveCurrentCircuit, saveRoster } from "../persist/remote";
 import { loadRuntimeConfig } from "../config";
 import { piecesRelativeToCenter, rotatePieces, snapshotPieces } from "./selection";
 import { resetPointSerial } from "./pieceFactory";
@@ -43,6 +44,7 @@ export interface EditorState {
   editorMode: EditorMode;
   clipboard: LayoutPiece[];
   pasting: LayoutPiece[] | null;
+  roster: RosterLoco[];
   past: LayoutDocument[];
   future: LayoutDocument[];
 }
@@ -76,6 +78,7 @@ type EditorAction =
   | { type: "addPieces"; pieces: LayoutPiece[] }
   | { type: "rotateSelected"; degrees: number }
   | { type: "selectAll" }
+  | { type: "setRoster"; roster: RosterLoco[] }
   | { type: "undo" }
   | { type: "redo" };
 
@@ -174,15 +177,23 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
           pieces: applyPieceMap(state.layout.pieces, action.pieces),
         },
       };
-    case "deleteSelected":
+    case "deleteSelected": {
       if (state.selectedIds.length === 0) return state;
+      const drop = new Set(state.selectedIds);
       return {
         ...withHistory(state, {
           ...state.layout,
-          pieces: state.layout.pieces.filter((piece) => !state.selectedIds.includes(piece.id)),
+          pieces: state.layout.pieces.filter((piece) => {
+            if (drop.has(piece.id)) return false;
+            if (piece.type === "rfid" && piece.hostPieceId && drop.has(piece.hostPieceId)) return false;
+            return true;
+          }),
         }),
         selectedIds: [],
       };
+    }
+    case "setRoster":
+      return { ...state, roster: action.roster };
     case "select":
       if (action.id == null) return { ...state, selectedIds: [] };
       if (action.additive) {
@@ -328,6 +339,7 @@ const initialState: EditorState = {
   editorMode: "plan",
   clipboard: [],
   pasting: null,
+  roster: [],
   past: [],
   future: [],
 };
@@ -360,15 +372,21 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       if (cancelled) return;
       if (remote !== "missing" && remote !== "offline") {
         dispatch({ type: "hydrate", layout: remote.layout, name: remote.name });
-        setHydrated(true);
-        return;
+      } else {
+        const saved = loadAutosave();
+        dispatch({ type: "hydrate", layout: saved ?? emptyLayout(), name: null });
+        if (remote === "missing" && saved) {
+          void saveCurrentCircuit(saved, null);
+        }
       }
-      const saved = loadAutosave();
-      dispatch({ type: "hydrate", layout: saved ?? emptyLayout(), name: null });
+      const remoteRoster = await fetchRoster();
+      if (cancelled) return;
+      if (remoteRoster !== "offline") {
+        dispatch({ type: "setRoster", roster: remoteRoster });
+      } else {
+        dispatch({ type: "setRoster", roster: loadRosterAutosave() ?? [] });
+      }
       setHydrated(true);
-      if (remote === "missing" && saved) {
-        void saveCurrentCircuit(saved, null);
-      }
     })();
     return () => {
       cancelled = true;
@@ -383,6 +401,15 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     }, 400);
     return () => window.clearTimeout(timer);
   }, [hydrated, state.layout, state.circuitName]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    writeRosterAutosave(state.roster);
+    const timer = window.setTimeout(() => {
+      void saveRoster(state.roster);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [hydrated, state.roster]);
 
   const selectedId = state.selectedIds.at(-1);
   const selected = state.layout.pieces.find((piece) => piece.id === selectedId);

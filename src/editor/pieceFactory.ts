@@ -1,22 +1,27 @@
 import { curveSpec, flippedPointSku, isPointSku, pointSpec, signalSpec } from "../catalog/lgb";
 import { localToWorld, normalizeDeg, rotateLocal } from "../model/geometry";
 import type { Hand, LayoutPiece, Placing } from "../model/types";
-import { newPieceId } from "../model/types";
+import { DEFAULT_RFID_FADE_MS, newPieceId } from "../model/types";
 
 let pointSerial = 1;
 let signalSerial = 1;
+let rfidSerial = 1;
 
 export function resetPointSerial(pieces: LayoutPiece[]): void {
   let maxPoint = 0;
   let maxSignal = 0;
+  let maxRfid = 0;
   for (const piece of pieces) {
     const pointMatch = /^Point (\d+)$/.exec(piece.name ?? "");
     if (pointMatch) maxPoint = Math.max(maxPoint, Number(pointMatch[1]));
     const signalMatch = /^Signal (\d+)$/.exec(piece.name ?? "");
     if (signalMatch) maxSignal = Math.max(maxSignal, Number(signalMatch[1]));
+    const rfidMatch = /^RFID (\d+)$/.exec(piece.name ?? "");
+    if (rfidMatch) maxRfid = Math.max(maxRfid, Number(rfidMatch[1]));
   }
   pointSerial = maxPoint + 1;
   signalSerial = maxSignal + 1;
+  rfidSerial = maxRfid + 1;
 }
 
 export function createPlacedPiece(
@@ -74,6 +79,24 @@ export function createPlacedPiece(
     };
   }
 
+  if (placing.type === "rfid") {
+    return {
+      id,
+      type: "rfid",
+      name: options?.preview ? "RFID" : `RFID ${rfidSerial++}`,
+      fadeMs: DEFAULT_RFID_FADE_MS,
+      mqtt: {
+        topic: "",
+        payloadThrough: "",
+        payloadDiverge: "",
+        statusTopic: "",
+      },
+      x,
+      y,
+      rotationDeg,
+    };
+  }
+
   const spec = pointSpec(placing.sku);
   return {
     id,
@@ -108,6 +131,7 @@ export function flipPlacing(placing: Placing): Placing {
   if (placing.type === "signal") {
     return { ...placing, hand: placing.hand === "right" ? "left" : "right" };
   }
+  if (placing.type === "rfid") return placing;
   return placing;
 }
 
@@ -131,7 +155,7 @@ export function flipPiece(piece: LayoutPiece): LayoutPiece {
     return { ...piece, hand: nextHand };
   }
 
-  if (piece.type === "signal") return piece;
+  if (piece.type === "signal" || piece.type === "rfid") return piece;
 
   if (!isPointSku(piece.sku)) return piece;
   const nextSku = flippedPointSku(piece.sku);

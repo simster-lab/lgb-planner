@@ -47,12 +47,23 @@ export function clonePieces(
   pieces: LayoutPiece[],
   offset: Vec2 = { x: 0, y: 0 },
 ): LayoutPiece[] {
-  return snapshotPieces(pieces).map((piece) => ({
-    ...piece,
-    id: newPieceId(),
-    x: piece.x + offset.x,
-    y: piece.y + offset.y,
-  }));
+  const idMap = new Map<string, string>();
+  const copies = snapshotPieces(pieces).map((piece) => {
+    const id = newPieceId();
+    idMap.set(piece.id, id);
+    return {
+      ...piece,
+      id,
+      x: piece.x + offset.x,
+      y: piece.y + offset.y,
+    };
+  });
+  return copies.map((piece) => {
+    if (piece.type !== "rfid" || !piece.hostPieceId) return piece;
+    const remapped = idMap.get(piece.hostPieceId);
+    if (remapped) return { ...piece, hostPieceId: remapped };
+    return { ...piece, hostPieceId: undefined };
+  });
 }
 
 export function piecesRelativeToCenter(pieces: LayoutPiece[]): LayoutPiece[] {

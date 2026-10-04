@@ -16,9 +16,10 @@ import {
   type Bounds,
 } from "./render";
 import { piecesAt } from "./selection";
+import { rfidFlashOverlays } from "./rfidFlash";
 import { attachPortId, cyclePlacingSnap, freePorts, ghostAt, snapMovedPiece } from "./snap";
 import { useEditor } from "./store";
-import type { LayoutPiece } from "../model/types";
+import { DEFAULT_RFID_FADE_MS, type LayoutPiece } from "../model/types";
 
 const MIN_ZOOM = 0.08;
 const MAX_ZOOM = 3.2;
@@ -122,6 +123,7 @@ export function EditorCanvas() {
           zoom: view.zoom,
           liveSections: plan ? undefined : safeLiveSections(layout.pieces),
           attachPortId: plan && placing ? attachPortId(placing) : undefined,
+          rfidFlashes: rfidFlashOverlays(),
           marquee:
             drag?.mode === "marquee"
               ? {
@@ -159,7 +161,7 @@ export function EditorCanvas() {
         dispatch({ type: "setPlacing", placing: flipPlacing(placing) });
         return;
       }
-      if (placing.type === "signal") return;
+      if (placing.type === "signal" || placing.type === "rfid") return;
       if (key === "d" || key === "s") {
         event.preventDefault();
         dispatch({
@@ -180,7 +182,7 @@ export function EditorCanvas() {
   const pieceAt = (world: { x: number; y: number }) => {
     for (let i = layout.pieces.length - 1; i >= 0; i -= 1) {
       const piece = layout.pieces[i];
-      if (hitTestPiece(piece, world, 28, view.zoom)) return piece;
+      if (hitTestPiece(piece, world, 28, view.zoom, layout.pieces)) return piece;
     }
     return undefined;
   };
@@ -231,7 +233,17 @@ export function EditorCanvas() {
     const now = performance.now();
     if (now - lastPlaceMs.current < 150) return;
     lastPlaceMs.current = now;
-    dispatch({ type: "addPieces", pieces: piecesAt(pasting, world) });
+    const dropped = piecesAt(pasting, world);
+    const next = dropped.map((piece) => {
+      if (piece.type !== "rfid") return piece;
+      if (piece.hostPieceId && dropped.some((item) => item.id === piece.hostPieceId)) return piece;
+      return snapMovedPiece(
+        piece,
+        [...layout.pieces, ...dropped.filter((item) => item.id !== piece.id)],
+      );
+    });
+    if (next.some((piece) => piece.type === "rfid" && !piece.hostPieceId)) return;
+    dispatch({ type: "addPieces", pieces: next });
   };
 
   const commitPlace = (world: { x: number; y: number }, source: string) => {
@@ -248,8 +260,19 @@ export function EditorCanvas() {
     placeDebug(`${source} commitPlace`);
     try {
       const preview = ghostAt(placing, layout.pieces, world.x, world.y);
+      if (preview.type === "rfid" && !preview.hostPieceId) {
+        placeDebug(`${source} commitPlace skipped (RFID needs track)`);
+        return;
+      }
       const piece = createPlacedPiece(placingFromPiece(preview), preview.x, preview.y, preview.rotationDeg);
-      addPiece(piece);
+      addPiece({
+        ...piece,
+        hostPieceId: preview.hostPieceId,
+        alongMm: preview.alongMm,
+        hostPath: preview.hostPath,
+        fadeMs: preview.fadeMs ?? DEFAULT_RFID_FADE_MS,
+        mqtt: preview.mqtt ?? piece.mqtt,
+      });
       placeDebug(`addPiece ${piece.type} ${piece.id}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -413,7 +436,7 @@ export function EditorCanvas() {
     const crossing = drag.currentClientX < drag.startClientX;
     const hit = layout.pieces
       .filter((piece) => {
-        const bounds = pieceBounds(piece, view.zoom);
+        const bounds = pieceBounds(piece, view.zoom, layout.pieces);
         return crossing ? boundsIntersect(box, bounds) : boundsContain(box, bounds);
       })
       .map((piece) => piece.id);

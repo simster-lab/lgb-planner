@@ -1,7 +1,9 @@
 import { pieceLabel } from "../catalog/lgb";
 import { flipPiece } from "../editor/pieceFactory";
+import { rfidNameOppositeForSide, rfidNameSide } from "../editor/render";
 import { useEditor } from "../editor/store";
 import { mqttService } from "../mqtt/client";
+import { DEFAULT_RFID_FADE_MS } from "../model/types";
 import { DraftNumberInput } from "./DraftNumberInput";
 
 export function Inspector() {
@@ -56,22 +58,26 @@ export function Inspector() {
         />
       </label>
 
-      {plan && selected.type === "point" && (
+      {plan && (selected.type === "point" || selected.type === "rfid") && (
         <label className="check">
           <input
             type="checkbox"
             checked={
               layout.pieces
-                .filter((piece) => selectedIds.includes(piece.id) && piece.type === "point")
+                .filter(
+                  (piece) =>
+                    selectedIds.includes(piece.id) &&
+                    (piece.type === selected.type),
+                )
                 .every((piece) => piece.showName)
             }
             onChange={(event) => {
               const showName = event.target.checked;
-              const points = layout.pieces.filter(
-                (piece) => selectedIds.includes(piece.id) && piece.type === "point",
+              const named = layout.pieces.filter(
+                (piece) => selectedIds.includes(piece.id) && piece.type === selected.type,
               );
-              if (points.length > 1) {
-                replacePieces(points.map((piece) => ({ ...piece, showName })));
+              if (named.length > 1) {
+                replacePieces(named.map((piece) => ({ ...piece, showName })));
               } else {
                 updatePiece(selected.id, { showName });
               }
@@ -79,6 +85,39 @@ export function Inspector() {
           />
           Show name on map
         </label>
+      )}
+
+      {plan && selected.type === "rfid" && selected.showName && (
+        <div className="row">
+          {(() => {
+            const side = rfidNameSide(selected, layout.pieces);
+            const vertical = side === "left" || side === "right";
+            const options = vertical
+              ? (["right", "left"] as const)
+              : (["above", "below"] as const);
+            const labels = { above: "Above", below: "Below", left: "Left", right: "Right" };
+            return options.map((option) => (
+              <button
+                key={option}
+                type="button"
+                className={side === option ? "active" : ""}
+                onClick={() => {
+                  const sensors = layout.pieces.filter(
+                    (piece) => selectedIds.includes(piece.id) && piece.type === "rfid",
+                  );
+                  const next = sensors.map((piece) => ({
+                    ...piece,
+                    nameOpposite: rfidNameOppositeForSide(piece, layout.pieces, option) || undefined,
+                  }));
+                  if (next.length > 1) replacePieces(next);
+                  else updatePiece(selected.id, { nameOpposite: next[0]?.nameOpposite });
+                }}
+              >
+                {labels[option]}
+              </button>
+            ));
+          })()}
+        </div>
       )}
 
       {plan && selected.type === "point" && (
@@ -335,6 +374,51 @@ export function Inspector() {
                     previewPiece({
                       ...selected,
                       mqtt: { ...emptyMqtt(selected), statusTopic: event.target.value },
+                    })
+                  }
+                />
+              </label>
+            </>
+          )}
+        </>
+      )}
+
+      {selected.type === "rfid" && (
+        <>
+          <h3>RFID sensor</h3>
+          <p className="hint">
+            Snaps onto a track piece. MQTT tag payload looks up the roster name
+            {mqttStatus === "connected" ? "" : " once MQTT is connected"}.
+          </p>
+          {plan && (
+            <>
+              <h3>MQTT</h3>
+              <label className="field">
+                <span>Status topic</span>
+                <input
+                  type="text"
+                  value={selected.mqtt?.statusTopic ?? ""}
+                  placeholder="garden/rfid/bridge-1"
+                  onChange={(event) =>
+                    previewPiece({
+                      ...selected,
+                      mqtt: { ...emptyMqtt(selected), statusTopic: event.target.value },
+                    })
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Fade ({Math.round((selected.fadeMs ?? DEFAULT_RFID_FADE_MS) / 100) / 10} s)</span>
+                <input
+                  type="range"
+                  min={500}
+                  max={15000}
+                  step={100}
+                  value={selected.fadeMs ?? DEFAULT_RFID_FADE_MS}
+                  onChange={(event) =>
+                    previewPiece({
+                      ...selected,
+                      fadeMs: Number(event.target.value),
                     })
                   }
                 />

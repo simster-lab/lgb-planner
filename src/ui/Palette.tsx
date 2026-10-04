@@ -90,6 +90,16 @@ export function Palette() {
         </button>
       ))}
 
+      <h3>Sensors</h3>
+      <button
+        type="button"
+        className={isActive(placing, "rfid") ? "active" : ""}
+        onClick={() => setPlacing({ type: "rfid" })}
+      >
+        RFID
+        <small>Snaps onto a rail</small>
+      </button>
+
       <p className="hint">
         Pieces snap at joiners. S and D cycle which end of the piece in your hand snaps (three on a
         point). F flips curves and points; R rotates a selection 90°. Ctrl+C / Ctrl+V copy and paste.
