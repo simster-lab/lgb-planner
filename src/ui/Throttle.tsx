@@ -17,9 +17,16 @@ type CabCard = {
   functions: boolean[];
 };
 
+let nextCardId = 0;
+
+function newCardId(): string {
+  nextCardId += 1;
+  return `cab-${nextCardId}`;
+}
+
 function newCard(cab: number | null): CabCard {
   return {
-    id: crypto.randomUUID(),
+    id: newCardId(),
     cab,
     acquired: false,
     speed: 0,
