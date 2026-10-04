@@ -142,19 +142,11 @@ function ThrottleCard({
           </label>
           <button
             type="button"
-            className={card.acquired ? "active" : ""}
-            disabled={!connected || card.cab == null || card.acquired}
-            onClick={acquire}
+            className={card.acquired ? "throttle-cab-toggle dispense" : "throttle-cab-toggle acquire"}
+            disabled={!connected || card.cab == null}
+            onClick={() => (card.acquired ? dispense(card.cab) : acquire())}
           >
-            Acquire
-          </button>
-          <button
-            type="button"
-            className={!card.acquired ? "active" : ""}
-            disabled={!connected || !card.acquired}
-            onClick={() => dispense(card.cab)}
-          >
-            Dispense
+            {card.acquired ? "Dispense" : "Acquire"}
           </button>
           <button type="button" className={card.forward ? "active" : ""} disabled={!live} onClick={() => setDirection(true)}>
             Forward

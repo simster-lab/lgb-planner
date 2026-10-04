@@ -392,7 +392,7 @@ function drawPointName(ctx: CanvasRenderingContext2D, piece: LayoutPiece, zoom: 
   const label = pieceLabel(piece);
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.font = `600 ${fontMm}px ui-sans-serif, system-ui`;
+  ctx.font = `600 ${fontMm}px Inter, ui-sans-serif, system-ui, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   const x = lever.x;
@@ -634,7 +634,7 @@ export function drawScene(
   ctx.fillStyle = "rgba(0,0,0,0.45)";
   ctx.fillRect(12, height - 36, 118, 22);
   ctx.fillStyle = "#e7d7a7";
-  ctx.font = "12px ui-sans-serif, system-ui";
+  ctx.font = "12px Inter, ui-sans-serif, system-ui, sans-serif";
   ctx.fillText("300 mm", 20, height - 20);
   ctx.strokeStyle = "#d4b06a";
   ctx.lineWidth = 2;

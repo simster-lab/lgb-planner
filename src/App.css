@@ -361,18 +361,19 @@ canvas.lever {
 .throttle-cards {
   display: flex;
   align-items: stretch;
-  gap: 12px;
+  gap: 8px;
   padding: 8px 14px 10px;
-  overflow-x: auto;
+  min-width: 0;
 }
 
 .throttle-card {
   display: flex;
-  gap: 12px;
+  gap: 8px;
   align-items: stretch;
-  flex: 0 0 auto;
+  flex: 1 1 0;
+  min-width: 0;
   position: relative;
-  padding: 10px 12px;
+  padding: 8px 10px;
   background: #1e241c;
   border: 1px solid #3d4a32;
   border-radius: 8px;
@@ -442,7 +443,7 @@ canvas.lever {
   flex-direction: column;
   justify-content: center;
   gap: 8px;
-  min-width: 196px;
+  min-width: 0;
 }
 
 .throttle-row {
@@ -459,18 +460,30 @@ canvas.lever {
 
 .throttle-fns {
   display: grid;
-  grid-template-columns: repeat(3, minmax(48px, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
 }
 
 .throttle-fns button {
   min-width: 0;
-  padding: 6px 8px;
-  font-size: 12px;
+  padding: 5px 2px;
+  font-size: 11px;
 }
 
 .throttle-fn-light {
   grid-column: 1 / -1;
+}
+
+.throttle-cab-toggle.acquire {
+  background: #2f4a32;
+  border-color: #6a9a6a;
+  color: #d8f0d4;
+}
+
+.throttle-cab-toggle.dispense {
+  background: #4a2a2a;
+  border-color: #c46a6a;
+  color: #f0c2c2;
 }
 
 .status {

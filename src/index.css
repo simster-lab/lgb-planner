@@ -1,5 +1,7 @@
 :root {
-  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  font-family: Inter, "Segoe UI Variable Text", "Segoe UI", Roboto, "Helvetica Neue", ui-sans-serif,
+    system-ui, sans-serif;
+  font-optical-sizing: auto;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -25,5 +27,5 @@ body {
 
 button,
 input {
-  font-family: "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  font-family: inherit;
 }
